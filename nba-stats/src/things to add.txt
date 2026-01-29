@@ -1,0 +1,4 @@
+- integrate playoff games into most recent games 
+- team tab 
+- way to breakdown each individual season - > games from that season , scorelines etc. 
+- idk look at basketball ref 
