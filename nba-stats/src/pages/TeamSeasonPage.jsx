@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
-const TeamPage = () => {
-  const { abbr } = useParams();
+const TeamSeasonPage = () => {
+  const { abbr, season } = useParams();
   const navigate = useNavigate();
   const [teamData, setTeamData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -11,12 +11,12 @@ const TeamPage = () => {
   // Helper function to get team logo URL
 
   useEffect(() => {
-    if (!abbr) return;
+    if (!abbr || !season) return;
 
     setLoading(true);
     setError(null);
 
-    fetch(`http://localhost:8000/teams/${abbr}`)
+    fetch(`http://localhost:8000/teams/${abbr}/${season}`)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -29,11 +29,11 @@ const TeamPage = () => {
         setLoading(false);
       })
       .catch(err => {
-        console.error(`Error fetching team ${abbr}:`, err);
+        console.error(`Error fetching team ${abbr} season ${season}:`, err);
         setError(err.message);
         setLoading(false);
       });
-  }, [abbr]);
+  }, [abbr, season]);
 
   if (loading) {
     return (
@@ -107,6 +107,10 @@ const TeamPage = () => {
           <div>
             <p><strong>Conference:</strong> {team.conference || 'N/A'}</p>
             <p><strong>Division:</strong> {team.division || 'N/A'}</p>
+          </div>
+          <div>
+            <p><strong>Season:</strong> {teamData.season || 'N/A'}</p>
+            <p><strong>Win-Loss Record:</strong> {teamData.wins || 'N/A'}-{teamData.losses || 'N/A'}</p>
           </div>
         </div>
       </div>
@@ -196,4 +200,4 @@ const TeamPage = () => {
   );
 }
 
-export default TeamPage;
+export default TeamSeasonPage;

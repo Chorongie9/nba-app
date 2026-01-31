@@ -25,7 +25,7 @@ const PlayerStats = ({ playerData }) => {
                   <td>{season.SEASON_ID}</td>
                   <td>
                     <Link
-                        to={`/teams/${season.TEAM_ABBREVIATION}`}
+                        to={`/teams/${season.TEAM_ABBREVIATION}/${season.SEASON_ID}`}
                         className="text-blue-600 hover:underline"
                     >
                       {season.TEAM_ABBREVIATION}
