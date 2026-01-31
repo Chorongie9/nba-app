@@ -399,14 +399,19 @@ def get_team_season(abbr: str, season: str):
         playerseasonstats = leaguedashplayerstats.LeagueDashPlayerStats(
             season=season,
             team_id_nullable=team_id,
-            season_type_all_star="Regular Season"
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame"
         )
         player_stats_df = playerseasonstats.get_data_frames()[0]
+        player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
+        player_stats_df = player_stats_df.astype(object)
+        player_stats = player_stats_df.to_dict(orient="records")
 
         return {
             "team_info": team,
             "season_stats": season_stats,
             "recent_games": recent_games,
+            "player_stats": player_stats,
             "season": season,
             "wins": team.get("wins"),
             "losses": team.get("losses"),

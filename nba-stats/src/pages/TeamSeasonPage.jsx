@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import PlayerStatsTable from '../components/PlayerStatsTable.jsx';
+
 
 const TeamSeasonPage = () => {
   const { abbr, season } = useParams();
@@ -34,6 +36,7 @@ const TeamSeasonPage = () => {
         setLoading(false);
       });
   }, [abbr, season]);
+
 
   if (loading) {
     return (
@@ -196,6 +199,11 @@ const TeamSeasonPage = () => {
           <p className="text-gray-600">No season stats found</p>
         )}
       </div>
+
+      {/* Player stats for the season (per-team) */}
+      {/* Player stats for the season (per-team) */}
+       <PlayerStatsTable abbr={abbr} season={season} />
+
     </div>
   );
 }
