@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import PlayerStatsTable from '../components/PlayerStatsTable.jsx';
 
 
@@ -172,7 +172,9 @@ const TeamSeasonPage = () => {
                             e.target.style.display = 'none';
                           }}
                         />
-                        <p className="font-semibold text-center text-sm">{opponentAbbr || opponentId}</p>
+                        <Link to={`/teams/${opponentAbbr}/${season}`} className="text-gray-600 hover:underline">
+                          {opponentAbbr || opponentId}
+                        </Link>
                       </div>
                     )}
                   </div>

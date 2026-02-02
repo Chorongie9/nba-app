@@ -12,7 +12,7 @@ function Home() {
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
-      <h1 className="text-5xl text-center font-bold mb-4">NBA Player Stats</h1>
+      <h1 className="text-5xl text-center font-bold mb-4">NBA Stats</h1>
       <div className="flex justify-center mb-4">
         <SearchBar searchPlayer={searchPlayer} />
       </div>

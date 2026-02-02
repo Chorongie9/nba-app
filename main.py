@@ -6,7 +6,6 @@ from nba_api.stats.endpoints import playergamelog
 from nba_api.stats.static import teams
 from nba_api.stats.endpoints import teamgamelog
 from nba_api.stats.endpoints import teamdashboardbygeneralsplits  # general stats
-from nba_api.stats.endpoints import boxscoretraditionalv2
 from nba_api.stats.endpoints import boxscoresummaryv3
 from nba_api.stats.endpoints import teamyearbyyearstats
 from nba_api.stats.endpoints import leaguestandings
@@ -147,7 +146,7 @@ def get_team_profile(abbr: str):
 
             if game_id:
                 try:
-                    summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id)
+                    summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id, timeout=60)
 
                     # ---------------------------
                     # Extract home/away IDs
@@ -193,7 +192,6 @@ def get_team_profile(abbr: str):
 
                 except Exception as box_err:
                     print(f"Error getting BoxScoreSummaryV3 for game {game_id}: {box_err}")
-                    traceback.print_exc()
                     # keep values None and continue so one bad game doesn't 500 the whole response
                     opp_id = opp_id if 'opp_id' in locals() else None
                     opp_abbr = opp_abbr if 'opp_abbr' in locals() else None
@@ -309,7 +307,6 @@ def get_team_season(abbr: str, season: str):
 
                 except Exception as box_err:
                     print(f"Error getting BoxScoreSummaryV3 for game {game_id}: {box_err}")
-                    traceback.print_exc()
                     # keep values None and continue so one bad game doesn't 500 the whole response
                     opp_id = opp_id if 'opp_id' in locals() else None
                     opp_abbr = opp_abbr if 'opp_abbr' in locals() else None
