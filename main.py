@@ -11,6 +11,8 @@ from nba_api.stats.endpoints import teamyearbyyearstats
 from nba_api.stats.endpoints import leaguestandings
 from nba_api.stats.endpoints import TeamInfoCommon
 from nba_api.stats.endpoints import leaguedashplayerstats
+from nba_api.stats.endpoints import ScoreboardV2
+from datetime import datetime
 
 import pandas as pd
 import numpy as np
@@ -116,6 +118,7 @@ def get_teams():
 
 @app.get("/teams/{abbr}")
 def get_team_profile(abbr: str):
+    season = "2025-26"  # default season
     try:
         abbr = abbr.strip().upper()
         all_teams = teams.get_teams()
@@ -138,6 +141,7 @@ def get_team_profile(abbr: str):
             game_id = row.get("Game_ID") or row.get("GAME_ID")
             wl = str(row.get("WL", ""))
             game_date = str(row.get("GAME_DATE", ""))
+
 
             team_pts = None
             opp_pts = None
@@ -208,21 +212,96 @@ def get_team_profile(abbr: str):
                 "OPP_ID": opp_id
             })
 
-        
+         #conference and division
+        standings = leaguestandings.LeagueStandings(season=season, league_id='00')
+        df = standings.get_data_frames()[0]
+
+        team_name = team["full_name"]
+        # TeamInfoCommon expects 'season_nullable' (not 'season')
+        try:
+            team_info = TeamInfoCommon(team_id=team_id, season_nullable=season)
+            df_team = team_info.get_data_frames()[0]
+            if df_team is not None and not df_team.empty:
+                conference = df_team.iloc[0].get("TEAM_CONFERENCE")
+                division = df_team.iloc[0].get("TEAM_DIVISION")
+            else:
+                conference = team.get("conference")
+                division = team.get("division")
+        except Exception as info_err:
+            print(f"Error fetching TeamInfoCommon for team {abbr} season {season}: {info_err}")
+            traceback.print_exc()
+            conference = team.get("conference")
+            division = team.get("division")
+
+        # ensure values exist on team object for frontend use
+        team["conference"] = conference
+        team["division"] = division
+
+        # Season Record
+        year_stats = teamyearbyyearstats.TeamYearByYearStats(team_id=team_id)
+        year_stats_df = year_stats.get_data_frames()[0]
+        year_stats_df = year_stats_df.replace([np.nan, np.inf, -np.inf], None)
+        year_stats_df = year_stats_df.astype(object)
+        season_row = year_stats_df[year_stats_df["YEAR"] == season]
+        if season_row.empty:
+            # try alternate hyphen variations
+            alt = season.replace('–', '-').strip()
+            if alt != season:
+                season_row = year_stats_df[year_stats_df["YEAR"] == alt]
+
+        if season_row.empty:
+            # try prefix match on year (e.g., '2017' matches '2017-18')
+            try:
+                season_prefix = str(season)[:4]
+                season_row = year_stats_df[year_stats_df["YEAR"].astype(str).str.startswith(season_prefix)]
+            except Exception:
+                season_row = season_row
+
+        if not season_row.empty:
+            try:
+                team["wins"] = int(season_row.iloc[0]["WINS"])
+                team["losses"] = int(season_row.iloc[0]["LOSSES"])
+            except Exception as e:
+                print(f"Error parsing W/L from year_stats for team {abbr} season {season}: {e}")
+                traceback.print_exc()
+                team["wins"] = None
+                team["losses"] = None
+        else:
+            print(f"Warning: no season row found for team {abbr} season {season}. Sample YEARS: {year_stats_df['YEAR'].astype(str).tolist()[:10]}")
+            team["wins"] = None
+            team["losses"] = None
+    
         # Season stats endpoint
         dashboard = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
             team_id=team_id,
-            season="2025-26",
+            season=season,
             season_type_all_star="Regular Season"
         )
         season_stats_df = dashboard.get_data_frames()[0]
         season_stats_df = season_stats_df.replace([np.nan, np.inf, -np.inf], None).astype(object)
         season_stats = season_stats_df.to_dict(orient="records")
 
+        playerseasonstats = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            team_id_nullable=team_id,
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame"
+        )
+        player_stats_df = playerseasonstats.get_data_frames()[0]
+        player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
+        player_stats_df = player_stats_df.astype(object)
+        player_stats = player_stats_df.to_dict(orient="records")
+
         return {
             "team_info": team,
+            "season_stats": season_stats,
             "recent_games": recent_games,
-            "season_stats": season_stats
+            "player_stats": player_stats,
+            "season": season,
+            "wins": team.get("wins"),
+            "losses": team.get("losses"),
+            "division": division,
+            "conference": conference
         }
 
     except Exception as e:
@@ -252,8 +331,9 @@ def get_team_season(abbr: str, season: str):
         for _, row in games_df.iterrows():
             game_id = row.get("Game_ID") or row.get("GAME_ID")
             wl = str(row.get("WL", ""))
-            game_date = str(row.get("GAME_DATE", ""))
-
+            game_date = str(row.get("GAME_DATE", ""))  
+            dt = datetime.strptime(game_date, "%b %d, %Y")
+            game_date = dt.strftime("%Y-%m-%d")
             team_pts = None
             opp_pts = None
             opp_abbr = None
@@ -261,57 +341,25 @@ def get_team_season(abbr: str, season: str):
 
             if game_id:
                 try:
-                    summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id)
+                    sb = ScoreboardV2(game_date=game_date, timeout=60)
 
-                    # ---------------------------
-                    # Extract home/away IDs
-                    # ---------------------------
-                    game_summary_df = summary.game_summary.get_data_frame()
+                    linescore_df = sb.get_data_frames()[1]
 
-                    if game_summary_df is None or game_summary_df.empty:
-                        raise ValueError("game_summary dataframe empty")
+                    game_scores = linescore_df[linescore_df["GAME_ID"] == game_id]
+                    our_row = game_scores[game_scores["TEAM_ID"] == team_id]
+                    team_pts = int(our_row.iloc[0].get("PTS") or 0)
 
-                    home_id = int(game_summary_df.iloc[0].get("homeTeamId"))
-                    away_id = int(game_summary_df.iloc[0].get("awayTeamId"))
-
-                    # Determine opponent ID
-                    if home_id == team_id:
-                        opp_id = away_id
-                        is_home = True
-                    else:
-                        opp_id = home_id
-                        is_home = False
-
-                    # ---------------------------
-                    # Extract scores + opponent abbreviation
-                    # ---------------------------
-                    line_score_df = summary.line_score.get_data_frame()
-
-                    if line_score_df is None or line_score_df.empty:
-                        raise ValueError("line_score dataframe empty")
-
-                    # Your row
-                    our_rows = line_score_df[line_score_df.get("teamId") == team_id]
-                    if our_rows.empty:
-                        raise ValueError(f"No row found for teamId {team_id} in line_score")
-                    our_row = our_rows.iloc[0]
-                    team_pts = int(our_row.get("score") or 0)
-
-                    # Opponent row
-                    opp_rows = line_score_df[line_score_df.get("teamId") == opp_id]
-                    if opp_rows.empty:
-                        raise ValueError(f"No row found for opp_id {opp_id} in line_score")
-                    opp_row = opp_rows.iloc[0]
-                    opp_pts = int(opp_row.get("score") or 0)
-                    opp_abbr = opp_row.get("teamTricode")
+                    opp_row = game_scores[game_scores["TEAM_ID"] != team_id]
+                    opp_pts = int(opp_row.iloc[0].get("PTS") or 0)
+                    opp_abbr = opp_row.iloc[0].get("TEAM_ABBREVIATION")
+                    opp_id = int(opp_row.iloc[0].get("TEAM_ID"))
 
                 except Exception as box_err:
-                    print(f"Error getting BoxScoreSummaryV3 for game {game_id}: {box_err}")
-                    # keep values None and continue so one bad game doesn't 500 the whole response
+                   
+                    print(f"Error getting ScoreboardV2 for game {game_id}: {box_err}")
+                    # keep values None and continue so one bad game doesn't 500 the whole response  
                     opp_id = opp_id if 'opp_id' in locals() else None
                     opp_abbr = opp_abbr if 'opp_abbr' in locals() else None
-                    team_pts = team_pts if 'team_pts' in locals() else None
-                    opp_pts = opp_pts if 'opp_pts' in locals() else None
 
             # Append final dict entry
             recent_games.append({
@@ -419,3 +467,6 @@ def get_team_season(abbr: str, season: str):
     except Exception as e:
         print(f"Error in get_team_season: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
+
+

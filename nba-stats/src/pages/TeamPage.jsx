@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import PlayerStatsTable from '../components/PlayerStatsTable.jsx';
+
 
 const TeamPage = () => {
   const { abbr } = useParams();
+  const season = "2025-26"; // Default season for team page
   const navigate = useNavigate();
   const [teamData, setTeamData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -11,7 +14,7 @@ const TeamPage = () => {
   // Helper function to get team logo URL
 
   useEffect(() => {
-    if (!abbr) return;
+    if (!abbr || !season) return;
 
     setLoading(true);
     setError(null);
@@ -29,11 +32,12 @@ const TeamPage = () => {
         setLoading(false);
       })
       .catch(err => {
-        console.error(`Error fetching team ${abbr}:`, err);
+        console.error(`Error fetching team ${abbr} season ${season}:`, err);
         setError(err.message);
         setLoading(false);
       });
-  }, [abbr]);
+  }, [abbr, season]);
+
 
   if (loading) {
     return (
@@ -108,6 +112,10 @@ const TeamPage = () => {
             <p><strong>Conference:</strong> {team.conference || 'N/A'}</p>
             <p><strong>Division:</strong> {team.division || 'N/A'}</p>
           </div>
+          <div>
+            <p><strong>Season:</strong> {teamData.season || 'N/A'}</p>
+            <p><strong>Win-Loss Record:</strong> {teamData.wins || 'N/A'}-{teamData.losses || 'N/A'}</p>
+          </div>
         </div>
       </div>
 
@@ -165,7 +173,9 @@ const TeamPage = () => {
                             e.target.style.display = 'none';
                           }}
                         />
-                        <p className="font-semibold text-center text-sm">{opponentAbbr || opponentId}</p>
+                        <Link to={`/teams/${opponentAbbr}/${season}`} className="text-gray-600 hover:underline">
+                          {opponentAbbr || opponentId}
+                        </Link>
                       </div>
                     )}
                   </div>
@@ -192,6 +202,11 @@ const TeamPage = () => {
           <p className="text-gray-600">No season stats found</p>
         )}
       </div>
+
+      {/* Player stats for the season (per-team) */}
+      {/* Player stats for the season (per-team) */}
+       <PlayerStatsTable abbr={abbr} season={season} />
+
     </div>
   );
 }
