@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import RecentGames from "../components/RecentGames";
 import PlayerStats from "../components/PlayerStats";
 import CareerAverages from "../components/CareerAverages";
+import SearchBar from "../components/SearchBar";
 
 
 function PlayerDetails() {
@@ -12,6 +13,7 @@ function PlayerDetails() {
   const [playerData, setPlayerData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!playerId) return;
@@ -36,6 +38,11 @@ function PlayerDetails() {
         setLoading(false);
       });
   }, [playerId]);
+
+  const searchPlayer = (id, name) => {
+    // Navigate to player details page with player ID and name as URL params
+    navigate(`/player/${id}?name=${encodeURIComponent(name)}`);
+  };
 
 
   if (loading) {
@@ -66,13 +73,8 @@ function PlayerDetails() {
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
-      <div className="mb-4">
-        <button
-          onClick={() => window.history.back()}
-          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
-        >
-          ← Back to Search
-        </button>
+      <div className="mb-4 text-center">
+        <SearchBar searchPlayer={searchPlayer}/>
       </div>
 
       <div className="mt-6">

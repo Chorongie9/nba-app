@@ -18,6 +18,8 @@ const PlayerStats = ({ playerData }) => {
             </thead>
             <tbody>
               {playerData.map((season, i) => {
+                
+                if(season.TEAM_ABBREVIATION === "TOT") return null; // skip total rows
 
                 console.log("TEAM_ABBREVIATION:", season.TEAM_ABBREVIATION);
                 return (

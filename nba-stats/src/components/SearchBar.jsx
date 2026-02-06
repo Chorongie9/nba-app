@@ -10,7 +10,6 @@ const SearchBar = ({ searchPlayer }) => {
       .then(data => setAllPlayers(data));
   }, []);
 
-  // Only filter after 3+ characters
   const filteredPlayers =
     searchTerm.length >= 3
       ? allPlayers
@@ -21,30 +20,34 @@ const SearchBar = ({ searchPlayer }) => {
       : [];
 
   return (
-    <div className="relative">
-      <input
-        type="text"
-        value={searchTerm}
-        onChange={e => setSearchTerm(e.target.value)}
-        placeholder="Search Player..."
-        className="border p-2 w-64"
-      />
-      {filteredPlayers.length > 0 && (
-        <ul className="absolute border bg-gray-100 w-64 max-h-40 overflow-auto z-10">
-          {filteredPlayers.map(player => (
-            <li
-              key={player.id}
-              onClick={() => {
-                searchPlayer(player.id, player.full_name);
-                setSearchTerm(""); // clear input
-              }}
-              className="cursor-pointer p-2 hover:bg-gray-200"
-            >
-              {player.full_name}
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="w-full flex justify-center">
+      {/* This wrapper keeps dropdown centered */}
+      <div className="relative w-64">
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+          placeholder="Search Player..."
+          className="border p-2 w-full"
+        />
+
+        {filteredPlayers.length > 0 && (
+          <ul className="absolute left-0 w-full border bg-gray-100 max-h-40 overflow-auto z-10 shadow-md">
+            {filteredPlayers.map(player => (
+              <li
+                key={player.id}
+                onClick={() => {
+                  searchPlayer(player.id, player.full_name);
+                  setSearchTerm("");
+                }}
+                className="cursor-pointer p-2 hover:bg-gray-200"
+              >
+                {player.full_name}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };
