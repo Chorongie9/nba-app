@@ -5,9 +5,16 @@ const SearchBar = ({ searchPlayer }) => {
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    fetch("http://localhost:8000/players")
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    fetch("http://localhost:8000/players", { signal: controller.signal })
       .then(res => res.json())
-      .then(data => setAllPlayers(data));
+      .then(data => setAllPlayers(data))
+      .catch(err => {
+        if (err.name !== 'AbortError') console.error('Error fetching players:', err);
+      })
+      .finally(() => clearTimeout(timeout));
   }, []);
 
   const filteredPlayers =

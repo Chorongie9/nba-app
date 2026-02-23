@@ -18,7 +18,10 @@ const TeamSeasonPage = () => {
     setLoading(true);
     setError(null);
 
-    fetch(`http://localhost:8000/teams/${abbr}/${season}`)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout for team season (lots of data)
+    
+    fetch(`http://localhost:8000/teams/${abbr}/${season}`, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -32,9 +35,10 @@ const TeamSeasonPage = () => {
       })
       .catch(err => {
         console.error(`Error fetching team ${abbr} season ${season}:`, err);
-        setError(err.message);
+        setError(err.name === 'AbortError' ? 'Request timed out - the server is taking too long to respond' : err.message);
         setLoading(false);
-      });
+      })
+      .finally(() => clearTimeout(timeout));
   }, [abbr, season]);
 
 
@@ -114,6 +118,18 @@ const TeamSeasonPage = () => {
           <div>
             <p><strong>Season:</strong> {teamData.season || 'N/A'}</p>
             <p><strong>Win-Loss Record:</strong> {teamData.wins || 'N/A'}-{teamData.losses || 'N/A'}</p>
+            {teamData.placing === 1 && (
+              <p><strong>Conference Ranking:</strong> {teamData.placing || 'N/A'}st</p>
+            )}
+            {teamData.placing === 2 && (
+              <p><strong>Conference Ranking:</strong> {teamData.placing || 'N/A'}nd</p>
+            )}
+            {teamData.placing === 3 && (
+              <p><strong>Conference Ranking:</strong> {teamData.placing || 'N/A'}rd</p>
+            )}
+            {teamData.placing > 3 && (
+              <p><strong>Conference Ranking:</strong> {teamData.placing || 'N/A'}th</p>
+            )}
           </div>
         </div>
       </div>

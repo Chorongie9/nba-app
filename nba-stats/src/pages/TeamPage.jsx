@@ -19,7 +19,10 @@ const TeamPage = () => {
     setLoading(true);
     setError(null);
 
-    fetch(`http://localhost:8000/teams/${abbr}`)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    fetch(`http://localhost:8000/teams/${abbr}`, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -32,10 +35,11 @@ const TeamPage = () => {
         setLoading(false);
       })
       .catch(err => {
-        console.error(`Error fetching team ${abbr} season ${season}:`, err);
-        setError(err.message);
+        console.error(`Error fetching team ${abbr}:`, err);
+        setError(err.name === 'AbortError' ? 'Request timed out - the server is taking too long to respond' : err.message);
         setLoading(false);
-      });
+      })
+      .finally(() => clearTimeout(timeout));
   }, [abbr, season]);
 
 

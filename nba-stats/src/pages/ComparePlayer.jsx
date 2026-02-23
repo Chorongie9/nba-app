@@ -21,7 +21,10 @@ const ComparePlayer = () => {
     if (!playerId) return;
 
     setLoading(true);
-    fetch(`http://localhost:8000/player/${playerId}`)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+    
+    fetch(`http://localhost:8000/player/${playerId}`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
         if (!Array.isArray(data)) throw new Error("Invalid player data");
@@ -31,16 +34,22 @@ const ComparePlayer = () => {
       .catch(err => {
         console.error(err);
         setFirstPlayerData([]);
-        setError("Failed to load first player");
+        setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to load first player");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        clearTimeout(timeout);
+      });
   }, [playerId]);
 
   const fetchComparison = (secondId, secondPlayerName) => {
     if (!playerId) return;
 
     setLoading(true);
-    fetch(`http://localhost:8000/compare/${playerId}/${secondId}`)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000); // 20 second timeout
+    
+    fetch(`http://localhost:8000/compare/${playerId}/${secondId}`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
         if (data.error) {
@@ -56,10 +65,13 @@ const ComparePlayer = () => {
       })
       .catch(err => {
         console.error(err);
-        setError("Failed to fetch comparison");
+        setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to fetch comparison");
         setSecondPlayerData([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        clearTimeout(timeout);
+      });
   };
 
   return (

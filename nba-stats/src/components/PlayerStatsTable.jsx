@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 
 const PlayerStatsTable = ({ abbr, season }) => {
   const [teamData, setTeamData] = useState(null);
@@ -12,14 +13,20 @@ const PlayerStatsTable = ({ abbr, season }) => {
     setLoading(true);
     setError(null);
 
-    fetch(`http://localhost:8000/teams/${abbr}/${season}`)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+    fetch(`http://localhost:8000/teams/${abbr}/${season}`, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then(data => setTeamData(data))
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch(err => setError(err.name === 'AbortError' ? 'Request timed out' : err.message))
+      .finally(() => {
+        setLoading(false);
+        clearTimeout(timeout);
+      });
   }, [abbr, season]);
 
   // Handle column header click
@@ -75,7 +82,16 @@ const PlayerStatsTable = ({ abbr, season }) => {
               <tr key={idx} className="border-t hover:bg-gray-50">
                 {columns.map(col => (
                   <td key={col} className="px-4 py-2 text-sm text-gray-800">
-                    {player[col] != null ? player[col] : 'N/A'}
+                    {col === 'PLAYER_NAME' ? (
+                      <Link
+                        to={`/players/${player.PLAYER_ID}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {player[col]}
+                      </Link>
+                    ) : (
+                      player[col] ?? 'N/A'
+                    )}
                   </td>
                 ))}
               </tr>

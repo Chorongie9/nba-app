@@ -13,11 +13,36 @@ from nba_api.stats.endpoints import TeamInfoCommon
 from nba_api.stats.endpoints import leaguedashplayerstats
 from nba_api.stats.endpoints import ScoreboardV2
 from datetime import datetime
+from retrying import retry
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 import pandas as pd
 import numpy as np
+import requests.exceptions
 import traceback
 
+# NBA API is often slow; use a generous timeout and pass to all endpoint calls
+NBA_REQUEST_TIMEOUT = 90
+# Short delay between sequential NBA API calls to reduce rate-limit/timeout issues
+NBA_REQUEST_DELAY_SEC = 0.6
+
+# In-memory cache for get_team_season to avoid repeated NBA API timeouts
+# Key: (abbr, season), Value: (expires_at_ts, response_dict)
+_team_season_cache = {}
+# Past seasons never change; cache 7 days. Current/last season: 15 min.
+TEAM_SEASON_CACHE_TTL_CURRENT_SEC = 15 * 60
+TEAM_SEASON_CACHE_TTL_PAST_SEC = 7 * 24 * 60 * 60
+CURRENT_SEASONS = ("2025-26", "2024-25")
+
+
+def _team_season_cache_ttl_sec(season: str) -> int:
+    return (
+        TEAM_SEASON_CACHE_TTL_CURRENT_SEC
+        if season in CURRENT_SEASONS
+        else TEAM_SEASON_CACHE_TTL_PAST_SEC
+    )
 
 
 app = FastAPI()
@@ -39,20 +64,26 @@ def get_players():
 @app.get("/player/{player_id}")
 def get_player(player_id: int):
     try:
+        print(f"[GET /player/{player_id}] Starting request...")
         df = playercareerstats.PlayerCareerStats(
-            player_id=player_id
+            player_id=player_id,
+            timeout=NBA_REQUEST_TIMEOUT
         ).get_data_frames()[0]
 
         if df.empty:
+            print(f"[GET /player/{player_id}] Empty dataframe returned")
             return {"error": "No career stats available"}
 
         # 🔥 THIS LINE FIXES YOUR BUG
         df = df.replace([np.nan, np.inf, -np.inf], None)
         df = df.astype(object)
 
+        print(f"[GET /player/{player_id}] Success - {len(df)} records")
         return df.to_dict(orient="records")
 
     except Exception as e:
+        print(f"[GET /player/{player_id}] Error: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
         return {"error": str(e)}
     
 from nba_api.stats.endpoints import playergamelog
@@ -62,7 +93,8 @@ def get_recent_games(player_id: int):
     try:
         df = playergamelog.PlayerGameLog(
             player_id=player_id,
-            season='ALL'
+            season='ALL',
+            timeout=NBA_REQUEST_TIMEOUT
         ).get_data_frames()[0]
 
         if df.empty:
@@ -83,8 +115,8 @@ def get_recent_games(player_id: int):
 @app.get("/compare/{player_id1}/{player_id2}")
 def compare_players(player_id1: int, player_id2: int):
     try:
-        df1 = playercareerstats.PlayerCareerStats(player_id=player_id1).get_data_frames()[0]
-        df2 = playercareerstats.PlayerCareerStats(player_id=player_id2).get_data_frames()[0]
+        df1 = playercareerstats.PlayerCareerStats(player_id=player_id1, timeout=NBA_REQUEST_TIMEOUT).get_data_frames()[0]
+        df2 = playercareerstats.PlayerCareerStats(player_id=player_id2, timeout=NBA_REQUEST_TIMEOUT).get_data_frames()[0]
 
         if df1.empty or df2.empty:
             return {"error": "No career stats available for one or both players"}
@@ -116,6 +148,25 @@ def get_teams():
     except Exception as e:
         return {"error": str(e)}
 
+
+def _is_timeout_or_connection_error(e):
+    return isinstance(
+        e,
+        (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ConnectTimeout,
+        ),
+    )
+
+
+@retry(
+    stop_max_attempt_number=5,
+    wait_exponential_multiplier=1000,
+    wait_exponential_max=10000,
+    retry_on_exception=_is_timeout_or_connection_error,
+)
 @app.get("/teams/{abbr}")
 def get_team_profile(abbr: str):
     season = "2025-26"  # default season
@@ -131,7 +182,9 @@ def get_team_profile(abbr: str):
         abbr_to_id = {t["abbreviation"]: t["id"] for t in all_teams}
 
         # Last 5 games
-        log = teamgamelog.TeamGameLog(team_id=team_id, season="2025-26")
+        log = teamgamelog.TeamGameLog(
+            team_id=team_id, season="2025-26", timeout=NBA_REQUEST_TIMEOUT
+        )
         games_df = log.get_data_frames()[0].head(5)
         games_df = games_df.replace([np.nan, np.inf, -np.inf], None)
 
@@ -150,7 +203,10 @@ def get_team_profile(abbr: str):
 
             if game_id:
                 try:
-                    summary = boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id, timeout=60)
+                    summary = boxscoresummaryv3.BoxScoreSummaryV3(
+                        game_id=game_id, timeout=NBA_REQUEST_TIMEOUT
+                    )
+                    time.sleep(NBA_REQUEST_DELAY_SEC)
 
                     # ---------------------------
                     # Extract home/away IDs
@@ -213,13 +269,17 @@ def get_team_profile(abbr: str):
             })
 
          #conference and division
-        standings = leaguestandings.LeagueStandings(season=season, league_id='00')
+        standings = leaguestandings.LeagueStandings(
+            season=season, league_id='00', timeout=NBA_REQUEST_TIMEOUT
+        )
         df = standings.get_data_frames()[0]
 
         team_name = team["full_name"]
         # TeamInfoCommon expects 'season_nullable' (not 'season')
         try:
-            team_info = TeamInfoCommon(team_id=team_id, season_nullable=season)
+            team_info = TeamInfoCommon(
+                team_id=team_id, season_nullable=season, timeout=NBA_REQUEST_TIMEOUT
+            )
             df_team = team_info.get_data_frames()[0]
             if df_team is not None and not df_team.empty:
                 conference = df_team.iloc[0].get("TEAM_CONFERENCE")
@@ -238,7 +298,9 @@ def get_team_profile(abbr: str):
         team["division"] = division
 
         # Season Record
-        year_stats = teamyearbyyearstats.TeamYearByYearStats(team_id=team_id)
+        year_stats = teamyearbyyearstats.TeamYearByYearStats(
+            team_id=team_id, timeout=NBA_REQUEST_TIMEOUT
+        )
         year_stats_df = year_stats.get_data_frames()[0]
         year_stats_df = year_stats_df.replace([np.nan, np.inf, -np.inf], None)
         year_stats_df = year_stats_df.astype(object)
@@ -275,7 +337,8 @@ def get_team_profile(abbr: str):
         dashboard = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
             team_id=team_id,
             season=season,
-            season_type_all_star="Regular Season"
+            season_type_all_star="Regular Season",
+            timeout=NBA_REQUEST_TIMEOUT,
         )
         season_stats_df = dashboard.get_data_frames()[0]
         season_stats_df = season_stats_df.replace([np.nan, np.inf, -np.inf], None).astype(object)
@@ -285,7 +348,8 @@ def get_team_profile(abbr: str):
             season=season,
             team_id_nullable=team_id,
             season_type_all_star="Regular Season",
-            per_mode_detailed="PerGame"
+            per_mode_detailed="PerGame",
+            timeout=NBA_REQUEST_TIMEOUT,
         )
         player_stats_df = playerseasonstats.get_data_frames()[0]
         player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
@@ -309,10 +373,25 @@ def get_team_profile(abbr: str):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+
+@retry(
+    stop_max_attempt_number=5,
+    wait_exponential_multiplier=1000,
+    wait_exponential_max=10000,
+    retry_on_exception=_is_timeout_or_connection_error,
+)
 @app.get("/teams/{abbr}/{season}")
 def get_team_season(abbr: str, season: str):
     try:
         abbr = abbr.strip().upper()
+        cache_key = (abbr, season)
+        now = time.time()
+        if cache_key in _team_season_cache:
+            expires_at, cached = _team_season_cache[cache_key]
+            if now < expires_at:
+                return cached
+            del _team_season_cache[cache_key]
+
         all_teams = teams.get_teams()
         team = next((t for t in all_teams if t["abbreviation"] == abbr), None)
 
@@ -322,45 +401,62 @@ def get_team_season(abbr: str, season: str):
         team_id = team["id"]
 
         # Last 5 games in specific season
-        log = teamgamelog.TeamGameLog(team_id=team_id, season=season)
+        log = teamgamelog.TeamGameLog(
+            team_id=team_id, season=season, timeout=NBA_REQUEST_TIMEOUT
+        )
         games_df = log.get_data_frames()[0].head(5)
         games_df = games_df.replace([np.nan, np.inf, -np.inf], None)
 
-        recent_games = []
-
+        # Build list of (game_id, wl, game_date_iso) for the loop
+        game_rows = []
         for _, row in games_df.iterrows():
             game_id = row.get("Game_ID") or row.get("GAME_ID")
             wl = str(row.get("WL", ""))
-            game_date = str(row.get("GAME_DATE", ""))  
+            game_date = str(row.get("GAME_DATE", ""))
             dt = datetime.strptime(game_date, "%b %d, %Y")
-            game_date = dt.strftime("%Y-%m-%d")
+            game_date_iso = dt.strftime("%Y-%m-%d")
+            game_rows.append((game_id, wl, game_date_iso))
+
+        # Fetch scoreboard once per unique game date (not per game) to reduce timeouts
+        scoreboard_by_date = {}
+        unique_dates = list(set([gdate for _, _, gdate in game_rows]))
+        
+        # Fetch scoreboards in parallel to speed up requests
+        def fetch_scoreboard(gdate):
+            try:
+                sb = ScoreboardV2(game_date=gdate, timeout=NBA_REQUEST_TIMEOUT)
+                return (gdate, sb.get_data_frames()[1])
+            except Exception as sb_err:
+                print(f"Error getting ScoreboardV2 for date {gdate}: {sb_err}")
+                return (gdate, None)
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(fetch_scoreboard, gdate) for gdate in unique_dates]
+            for future in as_completed(futures):
+                gdate, result = future.result()
+                scoreboard_by_date[gdate] = result
+                time.sleep(NBA_REQUEST_DELAY_SEC / 3)  # Reduced delay since we're parallelizing
+
+        recent_games = []
+        for game_id, wl, game_date in game_rows:
             team_pts = None
             opp_pts = None
             opp_abbr = None
             opp_id = None
-
-            if game_id:
+            linescore_df = scoreboard_by_date.get(game_date) if game_date else None
+            if game_id and linescore_df is not None and not linescore_df.empty:
                 try:
-                    sb = ScoreboardV2(game_date=game_date, timeout=60)
-
-                    linescore_df = sb.get_data_frames()[1]
-
                     game_scores = linescore_df[linescore_df["GAME_ID"] == game_id]
                     our_row = game_scores[game_scores["TEAM_ID"] == team_id]
-                    team_pts = int(our_row.iloc[0].get("PTS") or 0)
-
+                    if not our_row.empty:
+                        team_pts = int(our_row.iloc[0].get("PTS") or 0)
                     opp_row = game_scores[game_scores["TEAM_ID"] != team_id]
-                    opp_pts = int(opp_row.iloc[0].get("PTS") or 0)
-                    opp_abbr = opp_row.iloc[0].get("TEAM_ABBREVIATION")
-                    opp_id = int(opp_row.iloc[0].get("TEAM_ID"))
-
+                    if not opp_row.empty:
+                        opp_pts = int(opp_row.iloc[0].get("PTS") or 0)
+                        opp_abbr = opp_row.iloc[0].get("TEAM_ABBREVIATION")
+                        opp_id = int(opp_row.iloc[0].get("TEAM_ID"))
                 except Exception as box_err:
-                   
-                    print(f"Error getting ScoreboardV2 for game {game_id}: {box_err}")
-                    # keep values None and continue so one bad game doesn't 500 the whole response  
-                    opp_id = opp_id if 'opp_id' in locals() else None
-                    opp_abbr = opp_abbr if 'opp_abbr' in locals() else None
-
+                    print(f"Error parsing ScoreboardV2 for game {game_id}: {box_err}")
             # Append final dict entry
             recent_games.append({
                 "GAME_DATE": game_date,
@@ -373,86 +469,145 @@ def get_team_season(abbr: str, season: str):
 
 
         #conference and division
-        standings = leaguestandings.LeagueStandings(season=season, league_id='00')
-        df = standings.get_data_frames()[0]
-
-        team_name = team["full_name"]
-        # TeamInfoCommon expects 'season_nullable' (not 'season')
-        try:
-            team_info = TeamInfoCommon(team_id=team_id, season_nullable=season)
-            df_team = team_info.get_data_frames()[0]
-            if df_team is not None and not df_team.empty:
-                conference = df_team.iloc[0].get("TEAM_CONFERENCE")
-                division = df_team.iloc[0].get("TEAM_DIVISION")
-            else:
-                conference = team.get("conference")
-                division = team.get("division")
-        except Exception as info_err:
-            print(f"Error fetching TeamInfoCommon for team {abbr} season {season}: {info_err}")
-            traceback.print_exc()
+        conference_rank = None
+        
+        # Parallelize these three API calls
+        standings_df = None
+        conference = None
+        division = None
+        season_stats_df = None
+        player_stats_df = None
+        year_stats_df = None
+        
+        def fetch_standings():
+            try:
+                standings = leaguestandings.LeagueStandings(
+                    season=season, league_id='00', timeout=NBA_REQUEST_TIMEOUT
+                )
+                return standings.get_data_frames()[0]
+            except Exception as e:
+                print(f"Error fetching standings: {e}")
+                return None
+        
+        def fetch_team_info():
+            try:
+                team_info = TeamInfoCommon(
+                    team_id=team_id, season_nullable=season, timeout=NBA_REQUEST_TIMEOUT
+                )
+                return team_info.get_data_frames()[0]
+            except Exception as info_err:
+                print(f"Error fetching TeamInfoCommon for team {abbr} season {season}: {info_err}")
+                return None
+        
+        def fetch_year_stats():
+            try:
+                year_stats = teamyearbyyearstats.TeamYearByYearStats(
+                    team_id=team_id, timeout=NBA_REQUEST_TIMEOUT
+                )
+                return year_stats.get_data_frames()[0]
+            except Exception as e:
+                print(f"Error fetching year stats: {e}")
+                return None
+        
+        def fetch_season_stats():
+            try:
+                dashboard = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
+                    team_id=team_id,
+                    season=season,
+                    season_type_all_star="Regular Season",
+                    timeout=NBA_REQUEST_TIMEOUT,
+                )
+                return dashboard.get_data_frames()[0]
+            except Exception as e:
+                print(f"Error fetching season stats: {e}")
+                return None
+        
+        def fetch_player_stats():
+            try:
+                playerseasonstats = leaguedashplayerstats.LeagueDashPlayerStats(
+                    season=season,
+                    team_id_nullable=team_id,
+                    season_type_all_star="Regular Season",
+                    per_mode_detailed="PerGame",
+                    timeout=NBA_REQUEST_TIMEOUT,
+                )
+                return playerseasonstats.get_data_frames()[0]
+            except Exception as e:
+                print(f"Error fetching player stats: {e}")
+                return None
+        
+        # Execute all fetches in parallel
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                'standings': executor.submit(fetch_standings),
+                'team_info': executor.submit(fetch_team_info),
+                'year_stats': executor.submit(fetch_year_stats),
+                'season_stats': executor.submit(fetch_season_stats),
+                'player_stats': executor.submit(fetch_player_stats),
+            }
+            
+            standings_df = futures['standings'].result()
+            team_info_df = futures['team_info'].result()
+            year_stats_df = futures['year_stats'].result()
+            season_stats_df = futures['season_stats'].result()
+            player_stats_df = futures['player_stats'].result()
+        
+        # Extract standings info
+        if standings_df is not None and not standings_df.empty:
+            row = standings_df[standings_df["TeamID"] == team_id]
+            if not row.empty:
+                conference_rank = int(row.iloc[0]["PlayoffRank"])
+        
+        # Extract team info
+        if team_info_df is not None and not team_info_df.empty:
+            conference = team_info_df.iloc[0].get("TEAM_CONFERENCE")
+            division = team_info_df.iloc[0].get("TEAM_DIVISION")
+        else:
             conference = team.get("conference")
             division = team.get("division")
+        
+        # Extract season record (wins/losses)
+        team["wins"] = None
+        team["losses"] = None
+        if year_stats_df is not None and not year_stats_df.empty:
+            year_stats_df = year_stats_df.replace([np.nan, np.inf, -np.inf], None)
+            season_row = year_stats_df[year_stats_df["YEAR"] == season]
+            if season_row.empty:
+                # try alternate hyphen variations
+                alt = season.replace('–', '-').strip()
+                if alt != season:
+                    season_row = year_stats_df[year_stats_df["YEAR"] == alt]
+            
+            if season_row.empty:
+                # try prefix match on year (e.g., '2017' matches '2017-18')
+                try:
+                    season_prefix = str(season)[:4]
+                    season_row = year_stats_df[year_stats_df["YEAR"].astype(str).str.startswith(season_prefix)]
+                except Exception:
+                    pass
+            
+            if not season_row.empty:
+                try:
+                    team["wins"] = int(season_row.iloc[0]["WINS"])
+                    team["losses"] = int(season_row.iloc[0]["LOSSES"])
+                except Exception as e:
+                    print(f"Error parsing W/L: {e}")
+        
+        # Convert dataframes to dicts
+        season_stats = []
+        player_stats = []
+        
+        if season_stats_df is not None and not season_stats_df.empty:
+            season_stats_df = season_stats_df.replace([np.nan, np.inf, -np.inf], None)
+            season_stats_df = season_stats_df.astype(object)
+            season_stats = season_stats_df.to_dict(orient="records")
+        
+        if player_stats_df is not None and not player_stats_df.empty:
+            player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
+            player_stats_df = player_stats_df.astype(object)
+            player_stats = player_stats_df.to_dict(orient="records")
 
-        # ensure values exist on team object for frontend use
-        team["conference"] = conference
-        team["division"] = division
-
-        # Season Record
-        year_stats = teamyearbyyearstats.TeamYearByYearStats(team_id=team_id)
-        year_stats_df = year_stats.get_data_frames()[0]
-        year_stats_df = year_stats_df.replace([np.nan, np.inf, -np.inf], None)
-        year_stats_df = year_stats_df.astype(object)
-        season_row = year_stats_df[year_stats_df["YEAR"] == season]
-        if season_row.empty:
-            # try alternate hyphen variations
-            alt = season.replace('–', '-').strip()
-            if alt != season:
-                season_row = year_stats_df[year_stats_df["YEAR"] == alt]
-
-        if season_row.empty:
-            # try prefix match on year (e.g., '2017' matches '2017-18')
-            try:
-                season_prefix = str(season)[:4]
-                season_row = year_stats_df[year_stats_df["YEAR"].astype(str).str.startswith(season_prefix)]
-            except Exception:
-                season_row = season_row
-
-        if not season_row.empty:
-            try:
-                team["wins"] = int(season_row.iloc[0]["WINS"])
-                team["losses"] = int(season_row.iloc[0]["LOSSES"])
-            except Exception as e:
-                print(f"Error parsing W/L from year_stats for team {abbr} season {season}: {e}")
-                traceback.print_exc()
-                team["wins"] = None
-                team["losses"] = None
-        else:
-            print(f"Warning: no season row found for team {abbr} season {season}. Sample YEARS: {year_stats_df['YEAR'].astype(str).tolist()[:10]}")
-            team["wins"] = None
-            team["losses"] = None
-    
-        # Season stats endpoint
-        dashboard = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(
-            team_id=team_id,
-            season=season,
-            season_type_all_star="Regular Season"
-        )
-        season_stats_df = dashboard.get_data_frames()[0]
-        season_stats_df = season_stats_df.replace([np.nan, np.inf, -np.inf], None).astype(object)
-        season_stats = season_stats_df.to_dict(orient="records")
-
-        playerseasonstats = leaguedashplayerstats.LeagueDashPlayerStats(
-            season=season,
-            team_id_nullable=team_id,
-            season_type_all_star="Regular Season",
-            per_mode_detailed="PerGame"
-        )
-        player_stats_df = playerseasonstats.get_data_frames()[0]
-        player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
-        player_stats_df = player_stats_df.astype(object)
-        player_stats = player_stats_df.to_dict(orient="records")
-
-        return {
+        response = {
             "team_info": team,
             "season_stats": season_stats,
             "recent_games": recent_games,
@@ -461,12 +616,26 @@ def get_team_season(abbr: str, season: str):
             "wins": team.get("wins"),
             "losses": team.get("losses"),
             "division": division,
-            "conference": conference
+            "conference": conference,
+            "placing": conference_rank,
         }
+        # Cache so repeat requests don't hit the NBA API (avoids timeouts)
+        _team_season_cache[cache_key] = (
+            now + _team_season_cache_ttl_sec(season),
+            response,
+        )
+        return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error in get_team_season: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        status = 503 if _is_timeout_or_connection_error(e) else 500
+        detail = (
+            "The NBA API timed out or is unavailable; please try again."
+            if status == 503
+            else f"Internal server error: {str(e)}"
+        )
+        raise HTTPException(status_code=status, detail=detail)
     
-
 

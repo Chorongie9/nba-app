@@ -19,7 +19,10 @@ const RecentGames = ({ playerId }) => {
     setLoading(true);
     setError(null);
 
-    fetch(`http://localhost:8000/player/${playerId}/recent`)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    fetch(`http://localhost:8000/player/${playerId}/recent`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
         if (!Array.isArray(data)) throw new Error(data.error || "Invalid data");
@@ -34,10 +37,11 @@ const RecentGames = ({ playerId }) => {
       })
       .catch(err => {
         console.error(err);
-        setError("Failed to fetch recent games");
+        setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to fetch recent games");
         setRecentGames([]);
         setLoading(false);
-      });
+      })
+      .finally(() => clearTimeout(timeout));
   }, [playerId]);
 
   if (loading) return <p>Loading recent games...</p>;
