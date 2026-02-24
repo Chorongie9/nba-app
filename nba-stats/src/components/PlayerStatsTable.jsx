@@ -84,7 +84,7 @@ const PlayerStatsTable = ({ abbr, season }) => {
                   <td key={col} className="px-4 py-2 text-sm text-gray-800">
                     {col === 'PLAYER_NAME' ? (
                       <Link
-                        to={`/players/${player.PLAYER_ID}`}
+                        to={`/player/${player.PLAYER_ID}`}
                         className="text-blue-600 hover:underline"
                       >
                         {player[col]}

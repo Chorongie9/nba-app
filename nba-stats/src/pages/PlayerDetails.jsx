@@ -8,7 +8,6 @@ import SearchBar from "../components/SearchBar";
 function PlayerDetails() {
   const { playerId } = useParams();
   const [searchParams] = useSearchParams();
-  const playerName = searchParams.get("name");
   const [playerData, setPlayerData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -48,7 +47,8 @@ function PlayerDetails() {
   const searchPlayer = (id, name) => {
     navigate(`/player/${id}?name=${encodeURIComponent(name)}`);
   };
-
+  
+  // Prefer search param, fallback to fetched data
   if (loading) {
     return (
       <div className="p-8 max-w-5xl mx-auto flex justify-center items-center h-64">
@@ -70,6 +70,12 @@ function PlayerDetails() {
       </div>
     );
   }
+  const paramName = searchParams.get("name");
+  const apiName =
+  playerData?.PLAYER_NAME ||          // object style
+  playerData?.[0]?.PLAYER_NAME;        // array style fallback
+
+const playerName = paramName || apiName || "Unknown Player";
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
