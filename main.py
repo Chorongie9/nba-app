@@ -60,11 +60,14 @@ app.add_middleware(
 def get_players():
     return players.get_players()
 
-# Endpoint to return stats by player ID
+from nba_api.stats.static import players as static_players
+
 @app.get("/player/{player_id}")
 def get_player(player_id: int):
     try:
         print(f"[GET /player/{player_id}] Starting request...")
+
+        # Fetch career stats
         df = playercareerstats.PlayerCareerStats(
             player_id=player_id,
             timeout=NBA_REQUEST_TIMEOUT
@@ -74,12 +77,24 @@ def get_player(player_id: int):
             print(f"[GET /player/{player_id}] Empty dataframe returned")
             return {"error": "No career stats available"}
 
-        # 🔥 THIS LINE FIXES YOUR BUG
+        # 🔥 Fetch player name using nba_api
+        player_info = static_players.find_player_by_id(player_id)
+        player_name = player_info["full_name"] if player_info else None
+
+        # Clean dataframe
         df = df.replace([np.nan, np.inf, -np.inf], None)
         df = df.astype(object)
 
-        print(f"[GET /player/{player_id}] Success - {len(df)} records")
-        return df.to_dict(orient="records")
+        # Convert to records
+        records = df.to_dict(orient="records")
+
+        # 🔥 Inject player name into EACH ROW if missing
+        for row in records:
+            if "PLAYER_NAME" not in row or not row["PLAYER_NAME"]:
+                row["PLAYER_NAME"] = player_name
+
+        print(f"[GET /player/{player_id}] Success - {len(records)} records")
+        return records
 
     except Exception as e:
         print(f"[GET /player/{player_id}] Error: {type(e).__name__}: {str(e)}")
