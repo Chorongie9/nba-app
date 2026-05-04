@@ -22,8 +22,8 @@ function PlayerDetails() {
     setError(null);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-    
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     fetch(`http://localhost:8000/player/${playerId}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -42,7 +42,8 @@ function PlayerDetails() {
       })
       .catch((err) => {
         setError(err.name === 'AbortError' ? 'Request timed out - the server is taking too long to respond' : err.message);
-        setPlayerData([]);
+        setRegularData([]);
+        setPlayoffData([]);
         setLoading(false);
       })
       .finally(() => clearTimeout(timeout));

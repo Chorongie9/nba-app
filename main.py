@@ -60,7 +60,6 @@ app.add_middleware(
 def get_players():
     return players.get_players()
 
-# Endpoint to return stats by player ID
 @app.get("/player/{player_id}")
 def get_player(player_id: int):
     try:
@@ -91,8 +90,6 @@ def get_player(player_id: int):
         print(f"[GET /player/{player_id}] Error: {type(e).__name__}: {str(e)}")
         traceback.print_exc()
         return {"error": str(e)}
-    
-from nba_api.stats.endpoints import playergamelog
 
 @app.get("/player/{player_id}/recent")
 def get_recent_games(player_id: int):
