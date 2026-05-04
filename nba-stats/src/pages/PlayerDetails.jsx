@@ -9,7 +9,8 @@ function PlayerDetails() {
   const { playerId } = useParams();
   const [searchParams] = useSearchParams();
   const playerName = searchParams.get("name");
-  const [playerData, setPlayerData] = useState([]);
+  const [regularData, setRegularData] = useState([]);
+  const [playoffData, setPlayoffData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -31,9 +32,11 @@ function PlayerDetails() {
       .then((data) => {
         if (data.error) {
           setError(data.error);
-          setPlayerData([]);
+          setRegularData([]);
+          setPlayoffData([]);
         } else {
-          setPlayerData(data);
+          setRegularData(data.regular || []);
+          setPlayoffData(data.playoffs || []);
         }
         setLoading(false);
       })
@@ -109,7 +112,7 @@ function PlayerDetails() {
 
           {/* Career Averages */}
           <div className="p-6 bg-gray-50 rounded-xl border shadow-sm">
-            <CareerAverages playerData={playerData} />
+            <CareerAverages regularData={regularData} playoffData={playoffData} />
           </div>
 
           {/* Recent Games */}
@@ -119,8 +122,8 @@ function PlayerDetails() {
 
           {/* Player Stats Table */}
           <div className="p-6 bg-gray-50 rounded-xl border shadow-sm">
-            {playerData.length > 0 ? (
-              <PlayerStats playerData={playerData} />
+            {regularData.length > 0 ? (
+              <PlayerStats regularData={regularData} playoffData={playoffData} />
             ) : (
               <p className="text-center text-gray-600">No stats found for {playerName}</p>
             )}

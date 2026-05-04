@@ -65,21 +65,27 @@ def get_players():
 def get_player(player_id: int):
     try:
         print(f"[GET /player/{player_id}] Starting request...")
-        df = playercareerstats.PlayerCareerStats(
+        # One API call returns all result sets; [0] = regular season totals, [2] = playoff totals
+        frames = playercareerstats.PlayerCareerStats(
             player_id=player_id,
             timeout=NBA_REQUEST_TIMEOUT
-        ).get_data_frames()[0]
+        ).get_data_frames()
 
-        if df.empty:
+        regular_df = frames[0]
+        playoff_df = frames[2]
+
+        if regular_df.empty:
             print(f"[GET /player/{player_id}] Empty dataframe returned")
             return {"error": "No career stats available"}
 
-        # 🔥 THIS LINE FIXES YOUR BUG
-        df = df.replace([np.nan, np.inf, -np.inf], None)
-        df = df.astype(object)
+        regular_df = regular_df.replace([np.nan, np.inf, -np.inf], None).astype(object)
+        playoff_df = playoff_df.replace([np.nan, np.inf, -np.inf], None).astype(object)
 
-        print(f"[GET /player/{player_id}] Success - {len(df)} records")
-        return df.to_dict(orient="records")
+        print(f"[GET /player/{player_id}] Success - {len(regular_df)} regular, {len(playoff_df)} playoff records")
+        return {
+            "regular": regular_df.to_dict(orient="records"),
+            "playoffs": playoff_df.to_dict(orient="records"),
+        }
 
     except Exception as e:
         print(f"[GET /player/{player_id}] Error: {type(e).__name__}: {str(e)}")
@@ -91,23 +97,45 @@ from nba_api.stats.endpoints import playergamelog
 @app.get("/player/{player_id}/recent")
 def get_recent_games(player_id: int):
     try:
-        df = playergamelog.PlayerGameLog(
-            player_id=player_id,
-            season='ALL',
-            timeout=NBA_REQUEST_TIMEOUT
-        ).get_data_frames()[0]
+        # Fetch regular and playoff logs in parallel — same endpoint, different season_type param
+        def fetch_regular():
+            return playergamelog.PlayerGameLog(
+                player_id=player_id, season='ALL',
+                season_type_all_star='Regular Season',
+                timeout=NBA_REQUEST_TIMEOUT
+            ).get_data_frames()[0]
 
-        if df.empty:
+        def fetch_playoffs():
+            return playergamelog.PlayerGameLog(
+                player_id=player_id, season='ALL',
+                season_type_all_star='Playoffs',
+                timeout=NBA_REQUEST_TIMEOUT
+            ).get_data_frames()[0]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reg_future = executor.submit(fetch_regular)
+            po_future = executor.submit(fetch_playoffs)
+            reg_df = reg_future.result()
+            po_df = po_future.result()
+
+        frames = []
+        if not reg_df.empty:
+            reg_df['GAME_TYPE'] = 'Regular Season'
+            frames.append(reg_df)
+        if not po_df.empty:
+            po_df['GAME_TYPE'] = 'Playoffs'
+            frames.append(po_df)
+
+        if not frames:
             return {"error": "No games found"}
 
-        # sort newest → oldest & take last 5
-        df = df.head(5)
+        combined = pd.concat(frames)
+        # GAME_DATE from the API is "MMM DD, YYYY" (e.g. "NOV 05, 2024"); parse for sorting
+        combined['_sort_date'] = pd.to_datetime(combined['GAME_DATE'], format='%b %d, %Y', errors='coerce')
+        combined = combined.sort_values('_sort_date', ascending=False).drop(columns=['_sort_date']).head(5)
 
-        # replace NaN with None (JSON-safe)
-        df = df.replace([np.nan, np.inf, -np.inf], None)
-        df = df.astype(object)
-
-        return df.to_dict(orient="records")
+        combined = combined.replace([np.nan, np.inf, -np.inf], None).astype(object)
+        return combined.to_dict(orient="records")
 
     except Exception as e:
         return {"error": str(e)}
@@ -115,21 +143,25 @@ def get_recent_games(player_id: int):
 @app.get("/compare/{player_id1}/{player_id2}")
 def compare_players(player_id1: int, player_id2: int):
     try:
-        df1 = playercareerstats.PlayerCareerStats(player_id=player_id1, timeout=NBA_REQUEST_TIMEOUT).get_data_frames()[0]
-        df2 = playercareerstats.PlayerCareerStats(player_id=player_id2, timeout=NBA_REQUEST_TIMEOUT).get_data_frames()[0]
+        def fetch_player(pid):
+            frames = playercareerstats.PlayerCareerStats(player_id=pid, timeout=NBA_REQUEST_TIMEOUT).get_data_frames()
+            return frames[0], frames[2]  # regular season totals, playoff season totals
 
-        if df1.empty or df2.empty:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(fetch_player, player_id1)
+            f2 = executor.submit(fetch_player, player_id2)
+            reg1, po1 = f1.result()
+            reg2, po2 = f2.result()
+
+        if reg1.empty or reg2.empty:
             return {"error": "No career stats available for one or both players"}
 
-        # replace NaN with None (JSON-safe)
-        df1 = df1.replace([np.nan, np.inf, -np.inf], None)
-        df1 = df1.astype(object)
-        df2 = df2.replace([np.nan, np.inf, -np.inf], None)
-        df2 = df2.astype(object)
+        def clean(df):
+            return df.replace([np.nan, np.inf, -np.inf], None).astype(object).to_dict(orient="records")
 
         return {
-            "player1": df1.to_dict(orient="records"),
-            "player2": df2.to_dict(orient="records")
+            "player1": {"regular": clean(reg1), "playoffs": clean(po1)},
+            "player2": {"regular": clean(reg2), "playoffs": clean(po2)},
         }
 
     except Exception as e:

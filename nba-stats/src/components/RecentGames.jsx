@@ -1,13 +1,5 @@
 import { useEffect, useState } from "react";
 
-const parseMMDDYYYY = dateStr => {
-  if (!dateStr || dateStr.length !== 8) return null;
-  const month = parseInt(dateStr.slice(0, 2)) - 1;
-  const day = parseInt(dateStr.slice(2, 4));
-  const year = parseInt(dateStr.slice(4, 8));
-  return new Date(year, month, day);
-};
-
 const RecentGames = ({ playerId }) => {
   const [recentGames, setRecentGames] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -20,19 +12,13 @@ const RecentGames = ({ playerId }) => {
     setError(null);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
     fetch(`http://localhost:8000/player/${playerId}/recent`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
         if (!Array.isArray(data)) throw new Error(data.error || "Invalid data");
-
-        const sorted = data
-          .map(game => ({ ...game, parsedDate: parseMMDDYYYY(game.GAME_DATE) }))
-          .sort((a, b) => b.parsedDate - a.parsedDate)
-          .slice(0, 5);
-
-        setRecentGames(sorted);
+        setRecentGames(data);
         setLoading(false);
       })
       .catch(err => {
@@ -52,10 +38,13 @@ const RecentGames = ({ playerId }) => {
     <div className="mt-4">
       <h2 className="font-bold text-lg mb-2">Last 5 Games</h2>
       <ul className="space-y-2">
-        {recentGames.map(game => (
-          <li key={game.GAME_ID} className="border p-2 rounded">
-            <div className="font-semibold">
-              {game.MATCHUP} - {game.GAME_DATE}
+        {recentGames.map((game, i) => (
+          <li key={game.GAME_ID ?? i} className="border p-2 rounded">
+            <div className="font-semibold flex items-center gap-2">
+              <span>{game.MATCHUP} — {game.GAME_DATE}</span>
+              {game.GAME_TYPE === 'Playoffs' && (
+                <span className="text-xs bg-yellow-400 text-black px-1.5 py-0.5 rounded font-bold">PO</span>
+              )}
             </div>
             <div className="text-sm">
               PTS: {game.PTS} | REB: {game.REB} | AST: {game.AST}
