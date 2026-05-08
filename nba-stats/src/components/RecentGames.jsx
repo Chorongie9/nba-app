@@ -7,13 +7,10 @@ const RecentGames = ({ playerId }) => {
 
   useEffect(() => {
     if (!playerId) return;
-
     setLoading(true);
     setError(null);
-
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
-
     fetch(`http://localhost:8000/player/${playerId}/recent`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
@@ -22,7 +19,6 @@ const RecentGames = ({ playerId }) => {
         setLoading(false);
       })
       .catch(err => {
-        console.error(err);
         setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to fetch recent games");
         setRecentGames([]);
         setLoading(false);
@@ -30,28 +26,38 @@ const RecentGames = ({ playerId }) => {
       .finally(() => clearTimeout(timeout));
   }, [playerId]);
 
-  if (loading) return <p>Loading recent games...</p>;
-  if (error) return <p className="text-red-500">{error}</p>;
-  if (!recentGames.length) return <p>No recent games found</p>;
+  const header = (
+    <h2 className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-5">Last 5 Games</h2>
+  );
+
+  if (loading) return <div>{header}<p className="text-zinc-600 text-sm animate-pulse">Loading…</p></div>;
+  if (error)   return <div>{header}<p className="text-rose-500/70 text-sm">{error}</p></div>;
+  if (!recentGames.length) return <div>{header}<p className="text-zinc-600 text-sm">No recent games found</p></div>;
 
   return (
-    <div className="mt-4">
-      <h2 className="font-bold text-lg mb-2">Last 5 Games</h2>
-      <ul className="space-y-2">
+    <div>
+      {header}
+      <div className="divide-y divide-zinc-800/50">
         {recentGames.map((game, i) => (
-          <li key={game.GAME_ID ?? i} className="border p-2 rounded">
-            <div className="font-semibold flex items-center gap-2">
-              <span>{game.MATCHUP} — {game.GAME_DATE}</span>
+          <div key={game.GAME_ID ?? i} className="flex items-center justify-between py-3.5">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-zinc-200">{game.MATCHUP}</span>
               {game.GAME_TYPE === 'Playoffs' && (
-                <span className="text-xs bg-yellow-400 text-black px-1.5 py-0.5 rounded font-bold">PO</span>
+                <span className="text-[10px] bg-amber-400/15 text-amber-400 px-1.5 py-0.5 rounded font-semibold tracking-wide">PO</span>
               )}
             </div>
-            <div className="text-sm">
-              PTS: {game.PTS} | REB: {game.REB} | AST: {game.AST}
+            <span className="text-xs text-zinc-600 tabular-nums">{game.GAME_DATE}</span>
+            <div className="flex gap-5">
+              {[{ v: game.PTS, l: "pts" }, { v: game.REB, l: "reb" }, { v: game.AST, l: "ast" }].map(({ v, l }) => (
+                <span key={l} className="flex items-baseline gap-1">
+                  <span className="font-display font-bold text-xl text-zinc-100 leading-none">{v}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-600">{l}</span>
+                </span>
+              ))}
             </div>
-          </li>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 };

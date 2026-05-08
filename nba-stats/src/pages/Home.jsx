@@ -1,23 +1,32 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import SearchBar from "../components/SearchBar";
 
 function Home() {
-  const navigate = useNavigate();
-
-  const searchPlayer = (id, name) => {
-    // Navigate to player details page with player ID and name as URL params
-    navigate(`/player/${id}?name=${encodeURIComponent(name)}`);
-  };
-
   return (
-    <div className="p-4 max-w-5xl mx-auto">
-      <h1 className="text-5xl text-center font-bold mb-4">NBA Stats</h1>
-      <div className="flex justify-center mb-4">
-        <SearchBar searchPlayer={searchPlayer} />
-      </div>
-      <div className="text-center text-gray-600">
-        <p>Search for an NBA player to view their career statistics and recent games.</p>
+    <div className="flex flex-col items-center justify-center py-28 text-center">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-amber-400 mb-6">
+        Career · Season · Playoffs
+      </p>
+      <h1 className="font-display font-extrabold leading-none tracking-tight text-zinc-50 uppercase"
+          style={{ fontSize: "clamp(5rem, 15vw, 10rem)" }}>
+        NBA<br />Stats
+      </h1>
+      <p className="text-zinc-500 mt-6 text-sm max-w-xs leading-relaxed">
+        Search any player from the nav to explore career stats, recent games, and playoff history.
+      </p>
+      <div className="mt-16 flex items-stretch border border-zinc-800 rounded-xl overflow-hidden max-w-lg w-full">
+        {[
+          { label: "Career Averages", desc: "PPG · RPG · APG · FG%" },
+          { label: "Season Stats",    desc: "Regular & playoffs" },
+          { label: "Head-to-Head",    desc: "Scoreboard compare" },
+        ].map(({ label, desc }, i, arr) => (
+          <div
+            key={label}
+            className={`flex-1 px-5 py-5 text-center ${i < arr.length - 1 ? "border-r border-zinc-800" : ""}`}
+          >
+            <p className="text-xs font-medium text-zinc-200">{label}</p>
+            <p className="text-[11px] text-zinc-600 mt-1">{desc}</p>
+          </div>
+        ))}
       </div>
     </div>
   );

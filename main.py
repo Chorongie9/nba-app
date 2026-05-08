@@ -12,7 +12,8 @@ from nba_api.stats.endpoints import leaguestandings
 from nba_api.stats.endpoints import TeamInfoCommon
 from nba_api.stats.endpoints import leaguedashplayerstats
 from nba_api.stats.endpoints import ScoreboardV2
-from datetime import datetime
+from nba_api.stats.endpoints import boxscoretraditionalv2
+from datetime import datetime, date
 from retrying import retry
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -290,6 +291,7 @@ def get_team_profile(abbr: str):
             # Append final dict entry
             recent_games.append({
                 "GAME_DATE": game_date,
+                "GAME_ID": game_id,
                 "PTS": team_pts,
                 "WL": wl,
                 "OPP_PTS": opp_pts,
@@ -489,6 +491,7 @@ def get_team_season(abbr: str, season: str):
             # Append final dict entry
             recent_games.append({
                 "GAME_DATE": game_date,
+                "GAME_ID": game_id,
                 "PTS": team_pts,
                 "WL": wl,
                 "OPP_PTS": opp_pts,
@@ -666,5 +669,107 @@ def get_team_season(abbr: str, season: str):
             else f"Internal server error: {str(e)}"
         )
         raise HTTPException(status_code=status, detail=detail)
-    
 
+
+_game_cache = {}
+GAME_CACHE_TTL_PAST_SEC = 30 * 24 * 60 * 60
+GAME_CACHE_TTL_LIVE_SEC = 5 * 60
+
+
+def _game_cache_ttl_sec(game_date_str: str) -> int:
+    try:
+        gd = date.fromisoformat(str(game_date_str)[:10])
+        return GAME_CACHE_TTL_PAST_SEC if gd < date.today() else GAME_CACHE_TTL_LIVE_SEC
+    except Exception:
+        return GAME_CACHE_TTL_PAST_SEC
+
+
+@app.get("/game/{game_id}")
+def get_game(game_id: str):
+    now = time.time()
+    if game_id in _game_cache:
+        expires_at, cached = _game_cache[game_id]
+        if now < expires_at:
+            return cached
+        del _game_cache[game_id]
+
+    try:
+        def fetch_summary():
+            return boxscoresummaryv3.BoxScoreSummaryV3(game_id=game_id, timeout=NBA_REQUEST_TIMEOUT)
+
+        def fetch_box():
+            return boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id, timeout=NBA_REQUEST_TIMEOUT)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            sf = executor.submit(fetch_summary)
+            bf = executor.submit(fetch_box)
+            summary = sf.result()
+            box = bf.result()
+
+        game_summary_df = summary.game_summary.get_data_frame()
+        line_score_df = summary.line_score.get_data_frame()
+
+        if game_summary_df is None or game_summary_df.empty:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        row0 = game_summary_df.iloc[0]
+        home_team_id = int(row0.get("homeTeamId"))
+        away_team_id = int(row0.get("awayTeamId"))
+
+        raw_date = row0.get("gameDate") or row0.get("GAME_DATE_EST") or ""
+        game_date = str(raw_date)[:10]
+
+        arena = row0.get("arenaName") or row0.get("ARENA_NAME") or ""
+        arena_city = row0.get("arenaCity") or row0.get("ARENA_CITY") or ""
+        arena_parts = [p for p in [arena, arena_city] if p]
+        arena_str = ", ".join(str(p) for p in arena_parts)
+
+        # Team metadata from static data (no extra API call)
+        all_teams_list = teams.get_teams()
+        home_meta = next((t for t in all_teams_list if t["id"] == home_team_id), {})
+        away_meta = next((t for t in all_teams_list if t["id"] == away_team_id), {})
+
+        # Scores from line_score
+        scores = {}
+        for _, row in line_score_df.iterrows():
+            tid = int(row.get("teamId") or 0)
+            scores[tid] = int(row.get("score") or 0)
+
+        player_df = box.get_data_frames()[0]
+        team_df = box.get_data_frames()[1]
+
+        def build_team(tid, meta):
+            p = (
+                player_df[player_df["TEAM_ID"] == tid]
+                .replace([np.nan, np.inf, -np.inf], None)
+                .astype(object)
+                .to_dict(orient="records")
+            )
+            t = team_df[team_df["TEAM_ID"] == tid].replace([np.nan, np.inf, -np.inf], None).astype(object)
+            return {
+                "team_id": tid,
+                "abbreviation": meta.get("abbreviation", ""),
+                "full_name": meta.get("full_name", ""),
+                "score": scores.get(tid, 0),
+                "players": p,
+                "totals": t.iloc[0].to_dict() if not t.empty else {},
+            }
+
+        response = {
+            "game_id": game_id,
+            "game_date": game_date,
+            "arena": arena_str,
+            "home": build_team(home_team_id, home_meta),
+            "away": build_team(away_team_id, away_meta),
+        }
+
+        ttl = _game_cache_ttl_sec(game_date)
+        _game_cache[game_id] = (now + ttl, response)
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_game {game_id}: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

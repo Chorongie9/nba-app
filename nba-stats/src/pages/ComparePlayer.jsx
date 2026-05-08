@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import SearchBar from "../components/SearchBar";
 import CompareTable from "../components/CompareTable";
 
@@ -17,14 +17,11 @@ const ComparePlayer = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Load first player's data on mount so their card shows immediately
   useEffect(() => {
     if (!playerId) return;
-
     setLoading(true);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-
     fetch(`http://localhost:8000/player/${playerId}`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
@@ -33,60 +30,42 @@ const ComparePlayer = () => {
         setPlayer1Playoffs(data.playoffs || []);
         setError(null);
       })
-      .catch(err => {
-        console.error(err);
-        setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to load first player");
-      })
-      .finally(() => {
-        setLoading(false);
-        clearTimeout(timeout);
-      });
+      .catch(err => { setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to load player"); })
+      .finally(() => { setLoading(false); clearTimeout(timeout); });
   }, [playerId]);
 
   const fetchComparison = (secondId, name) => {
     if (!playerId) return;
-
     setLoading(true);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
-
     fetch(`http://localhost:8000/compare/${playerId}/${secondId}`, { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
-        if (data.error) {
-          setError(data.error);
-        } else {
-          setPlayer1Regular(data.player1.regular || []);
-          setPlayer1Playoffs(data.player1.playoffs || []);
-          setPlayer2Regular(data.player2.regular || []);
-          setPlayer2Playoffs(data.player2.playoffs || []);
-          setSecondPlayerName(name);
-          setSecondPlayerId(secondId);
-          setError(null);
-        }
+        if (data.error) { setError(data.error); return; }
+        setPlayer1Regular(data.player1.regular || []);
+        setPlayer1Playoffs(data.player1.playoffs || []);
+        setPlayer2Regular(data.player2.regular || []);
+        setPlayer2Playoffs(data.player2.playoffs || []);
+        setSecondPlayerName(name);
+        setSecondPlayerId(secondId);
+        setError(null);
       })
-      .catch(err => {
-        console.error(err);
-        setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to fetch comparison");
-      })
-      .finally(() => {
-        setLoading(false);
-        clearTimeout(timeout);
-      });
+      .catch(err => { setError(err.name === 'AbortError' ? 'Request timed out' : "Failed to fetch comparison"); })
+      .finally(() => { setLoading(false); clearTimeout(timeout); });
   };
 
   return (
-    <div>
-      <h2 className="text-2xl font-bold text-center">Compare {firstPlayerName} with:</h2>
-      <div className="flex justify-center my-4">
+    <div className="space-y-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-3">Compare</p>
+        <h2 className="font-display font-extrabold text-3xl text-zinc-50 uppercase tracking-wide mb-5">
+          {firstPlayerName} <span className="text-zinc-700">vs.</span>
+        </h2>
         <SearchBar searchPlayer={fetchComparison} />
+        {loading && <p className="text-zinc-600 text-xs mt-3 animate-pulse">Loading…</p>}
+        {error && <p className="text-rose-500/70 text-xs mt-3">{error}</p>}
       </div>
-      <Link to="/" className="block text-center mb-4 text-blue-500 hover:underline">
-        &larr; Back to Home
-      </Link>
-
-      {loading && <p>Loading comparison...</p>}
-      {error && <p className="text-red-500">{error}</p>}
 
       <CompareTable
         player1Regular={player1Regular}

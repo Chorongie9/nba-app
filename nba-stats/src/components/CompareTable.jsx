@@ -45,86 +45,91 @@ const SCOREBOARD_STATS = [
   { key: "FT%",  label: "FT%",  fmt: v => v.toFixed(1) + "%" },
 ];
 
+const Toggle = ({ showPlayoffs, setShowPlayoffs }) => (
+  <div className="flex items-center gap-3 text-xs">
+    <button
+      onClick={() => setShowPlayoffs(false)}
+      className={`pb-0.5 transition-colors ${!showPlayoffs ? "text-zinc-100 border-b border-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+    >
+      Regular Season
+    </button>
+    <span className="text-zinc-700">/</span>
+    <button
+      onClick={() => setShowPlayoffs(true)}
+      className={`pb-0.5 transition-colors ${showPlayoffs ? "text-amber-400 border-b border-amber-400" : "text-zinc-500 hover:text-zinc-300"}`}
+    >
+      Playoffs
+    </button>
+  </div>
+);
+
 const Scoreboard = ({ player1Regular, player1Playoffs, player2Regular, player2Playoffs, firstPlayerName, secondPlayerName, player1Id, player2Id }) => {
   const [showPlayoffs, setShowPlayoffs] = useState(false);
-
   const hasPlayoffs = player1Playoffs?.length > 0 && player2Playoffs?.length > 0;
-  const d1 = showPlayoffs ? player1Playoffs : player1Regular;
-  const d2 = showPlayoffs ? player2Playoffs : player2Regular;
+  const s1 = computeCareer(showPlayoffs ? player1Playoffs : player1Regular);
+  const s2 = computeCareer(showPlayoffs ? player2Playoffs : player2Regular);
 
-  const s1 = computeCareer(d1);
-  const s2 = computeCareer(d2);
-
-  if (!s1 || !s2) return <p className="text-center text-gray-500 mt-6">Select a second player to see the scoreboard.</p>;
+  if (!s1 || !s2) return (
+    <p className="text-center text-zinc-600 py-12 text-sm">Select a second player to see the scoreboard.</p>
+  );
 
   return (
-    <div className="mt-4 max-w-2xl mx-auto">
-      {/* Season type toggle */}
+    <div className="max-w-2xl mx-auto">
       {hasPlayoffs && (
-        <div className="flex justify-center mb-4">
-          <div className="flex rounded-full overflow-hidden border border-gray-300 text-sm font-medium">
-            <button
-              onClick={() => setShowPlayoffs(false)}
-              className={`px-4 py-1.5 transition ${!showPlayoffs ? "bg-gray-800 text-white" : "bg-white text-gray-600 hover:bg-gray-100"}`}
-            >
-              Regular Season
-            </button>
-            <button
-              onClick={() => setShowPlayoffs(true)}
-              className={`px-4 py-1.5 transition ${showPlayoffs ? "bg-yellow-500 text-black" : "bg-white text-gray-600 hover:bg-gray-100"}`}
-            >
-              Playoffs
-            </button>
-          </div>
+        <div className="flex justify-center mb-8">
+          <Toggle showPlayoffs={showPlayoffs} setShowPlayoffs={setShowPlayoffs} />
         </div>
       )}
 
-      {/* Player headers */}
-      <div className="grid grid-cols-3 items-center mb-6 gap-2">
-        <div className="flex flex-col items-center">
+      <div className="grid grid-cols-3 items-center mb-10 gap-4">
+        <div className="flex flex-col items-center gap-3">
           <img
             src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${player1Id}.png`}
             alt={firstPlayerName}
-            className="w-24 h-24 rounded-full object-cover shadow border border-gray-200 mb-1"
-            onError={e => { e.target.src = 'https://via.placeholder.com/96x96?text=?'; }}
+            className="w-20 h-20 rounded-full object-cover object-top border border-zinc-800"
+            onError={e => { e.target.style.display = 'none'; }}
           />
-          <Link to={`/player/${player1Id}?name=${encodeURIComponent(firstPlayerName)}`} className="font-semibold text-sm text-center hover:underline text-blue-700">
+          <Link
+            to={`/player/${player1Id}?name=${encodeURIComponent(firstPlayerName)}`}
+            className="font-medium text-xs text-center text-zinc-200 hover:text-amber-400 transition-colors leading-snug"
+          >
             {firstPlayerName}
           </Link>
         </div>
-
-        <p className="text-center text-xs uppercase tracking-widest text-gray-400 font-semibold">Career Averages</p>
-
-        <div className="flex flex-col items-center">
+        <p className="text-center text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-semibold">
+          Career Averages
+        </p>
+        <div className="flex flex-col items-center gap-3">
           <img
             src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${player2Id}.png`}
             alt={secondPlayerName}
-            className="w-24 h-24 rounded-full object-cover shadow border border-gray-200 mb-1"
-            onError={e => { e.target.src = 'https://via.placeholder.com/96x96?text=?'; }}
+            className="w-20 h-20 rounded-full object-cover object-top border border-zinc-800"
+            onError={e => { e.target.style.display = 'none'; }}
           />
-          <Link to={`/player/${player2Id}?name=${encodeURIComponent(secondPlayerName)}`} className="font-semibold text-sm text-center hover:underline text-blue-700">
+          <Link
+            to={`/player/${player2Id}?name=${encodeURIComponent(secondPlayerName)}`}
+            className="font-medium text-xs text-center text-zinc-200 hover:text-amber-400 transition-colors leading-snug"
+          >
             {secondPlayerName}
           </Link>
         </div>
       </div>
 
-      {/* Stat rows */}
-      <div className="divide-y divide-gray-100 border rounded-xl overflow-hidden">
+      <div className="divide-y divide-zinc-800/50 border border-zinc-800 rounded-xl overflow-hidden">
         {SCOREBOARD_STATS.map(({ key, label, fmt }) => {
           const v1 = s1[key];
           const v2 = s2[key];
           const p1wins = v1 > v2;
           const p2wins = v2 > v1;
-
           return (
-            <div key={key} className="grid grid-cols-3 items-center py-3 px-4 bg-white hover:bg-gray-50 transition">
-              <span className={`text-xl font-bold text-right pr-4 ${p1wins ? "text-green-600" : "text-gray-400"}`}>
+            <div key={key} className="grid grid-cols-3 items-center py-4 px-6 hover:bg-zinc-800/20 transition-colors">
+              <span className={`font-display font-extrabold text-3xl text-right pr-6 ${p1wins ? "text-zinc-50" : "text-zinc-700"}`}>
                 {fmt(v1)}
               </span>
-              <span className="text-center text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <span className="text-center text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-600">
                 {label}
               </span>
-              <span className={`text-xl font-bold text-left pl-4 ${p2wins ? "text-green-600" : "text-gray-400"}`}>
+              <span className={`font-display font-extrabold text-3xl text-left pl-6 ${p2wins ? "text-zinc-50" : "text-zinc-700"}`}>
                 {fmt(v2)}
               </span>
             </div>
@@ -135,25 +140,48 @@ const Scoreboard = ({ player1Regular, player1Playoffs, player2Regular, player2Pl
   );
 };
 
+const PlayerCard = ({ regular, playoffs, name, playerId }) => (
+  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 flex flex-col items-center gap-5">
+    <img
+      src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`}
+      alt={name}
+      className="w-28 h-28 rounded-full object-cover object-top border border-zinc-800"
+      onError={e => { e.target.style.display = 'none'; }}
+    />
+    <h3 className="font-display font-bold text-xl text-zinc-50 text-center uppercase tracking-wide">
+      <Link to={`/player/${playerId}?name=${encodeURIComponent(name)}`} className="hover:text-amber-400 transition-colors">
+        {name}
+      </Link>
+    </h3>
+    <div className="w-full border-t border-zinc-800 pt-5">
+      <CareerAverages regularData={regular} playoffData={playoffs} />
+    </div>
+    <div className="w-full border-t border-zinc-800 pt-5">
+      <PlayerStats regularData={regular} playoffData={playoffs} />
+    </div>
+  </div>
+);
+
 const CompareTable = ({ player1Regular, player1Playoffs, player2Regular, player2Playoffs, firstPlayerName, secondPlayerName, player1Id, player2Id }) => {
   const [view, setView] = useState("cards");
   const hasSecondPlayer = player2Regular && player2Regular.length > 0;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-center gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-center">Player Comparison</h2>
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Player Comparison</h2>
         {hasSecondPlayer && (
-          <div className="flex rounded-full overflow-hidden border border-gray-300 text-sm font-medium">
+          <div className="flex items-center gap-3 text-xs">
             <button
               onClick={() => setView("cards")}
-              className={`px-4 py-1.5 transition ${view === "cards" ? "bg-gray-800 text-white" : "bg-white text-gray-600 hover:bg-gray-100"}`}
+              className={`pb-0.5 transition-colors ${view === "cards" ? "text-zinc-100 border-b border-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
             >
               Cards
             </button>
+            <span className="text-zinc-700">/</span>
             <button
               onClick={() => setView("scoreboard")}
-              className={`px-4 py-1.5 transition ${view === "scoreboard" ? "bg-gray-800 text-white" : "bg-white text-gray-600 hover:bg-gray-100"}`}
+              className={`pb-0.5 transition-colors ${view === "scoreboard" ? "text-zinc-100 border-b border-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
             >
               Scoreboard
             </button>
@@ -162,59 +190,29 @@ const CompareTable = ({ player1Regular, player1Playoffs, player2Regular, player2
       </div>
 
       {view === "scoreboard" ? (
-        <Scoreboard
-          player1Regular={player1Regular}
-          player1Playoffs={player1Playoffs}
-          player2Regular={player2Regular}
-          player2Playoffs={player2Playoffs}
-          firstPlayerName={firstPlayerName}
-          secondPlayerName={secondPlayerName}
-          player1Id={player1Id}
-          player2Id={player2Id}
-        />
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <Scoreboard
+            player1Regular={player1Regular}
+            player1Playoffs={player1Playoffs}
+            player2Regular={player2Regular}
+            player2Playoffs={player2Playoffs}
+            firstPlayerName={firstPlayerName}
+            secondPlayerName={secondPlayerName}
+            player1Id={player1Id}
+            player2Id={player2Id}
+          />
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Player 1 Card */}
-          <div className="border rounded-lg shadow-lg bg-white p-4 flex flex-col items-center">
-            <h3 className="text-xl font-semibold mb-2">
-              <Link to={`/player/${player1Id}?name=${encodeURIComponent(firstPlayerName)}`} className="hover:underline">
-                {firstPlayerName}
-              </Link>
-            </h3>
-            <img
-              src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${player1Id}.png`}
-              alt={firstPlayerName}
-              className="w-40 h-40 rounded-full object-cover shadow-md mb-4"
-              onError={(e) => { e.target.src = 'https://via.placeholder.com/160x160?text=No+Photo'; }}
-            />
-            <div className="w-full">
-              <CareerAverages regularData={player1Regular} playoffData={player1Playoffs} />
-            </div>
-            <div className="w-full mt-4">
-              <PlayerStats regularData={player1Regular} playoffData={player1Playoffs} />
-            </div>
-          </div>
-
-          {/* Player 2 Card */}
-          <div className="border rounded-lg shadow-lg bg-white p-4 flex flex-col items-center">
-            <h3 className="text-xl font-semibold mb-2">
-              <Link to={`/player/${player2Id}?name=${encodeURIComponent(secondPlayerName)}`} className="hover:underline">
-                {secondPlayerName}
-              </Link>
-            </h3>
-            <img
-              src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${player2Id}.png`}
-              alt={secondPlayerName}
-              className="w-40 h-40 rounded-full object-cover shadow-md mb-4"
-              onError={(e) => { e.target.src = 'https://via.placeholder.com/160x160?text=No+Photo'; }}
-            />
-            <div className="w-full">
-              <CareerAverages regularData={player2Regular} playoffData={player2Playoffs} />
-            </div>
-            <div className="w-full mt-4">
-              <PlayerStats regularData={player2Regular} playoffData={player2Playoffs} />
-            </div>
-          </div>
+          <PlayerCard regular={player1Regular} playoffs={player1Playoffs} name={firstPlayerName} playerId={player1Id} />
+          {hasSecondPlayer
+            ? <PlayerCard regular={player2Regular} playoffs={player2Playoffs} name={secondPlayerName} playerId={player2Id} />
+            : (
+              <div className="bg-zinc-900 border border-dashed border-zinc-800 rounded-xl flex items-center justify-center h-48">
+                <p className="text-zinc-600 text-sm">Search for a player above to compare</p>
+              </div>
+            )
+          }
         </div>
       )}
     </div>
