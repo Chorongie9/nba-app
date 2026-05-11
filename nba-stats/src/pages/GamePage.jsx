@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 
 const getTeamLogo = (teamId) => {
   if (!teamId) return null;
@@ -68,7 +68,16 @@ const BoxScoreTable = ({ team }) => {
         <td className="py-2.5 pl-4 pr-4 whitespace-nowrap">
           <div className="flex items-center gap-2">
             <span className="text-[9px] text-zinc-600 w-3 shrink-0">{p.START_POSITION || ''}</span>
-            <span className={`text-xs ${isDNP ? 'text-zinc-600' : 'text-zinc-200'}`}>{p.PLAYER_NAME}</span>
+            {isDNP ? (
+              <span className="text-xs text-zinc-600">{p.PLAYER_NAME}</span>
+            ) : (
+              <Link
+                to={`/player/${p.PLAYER_ID}?name=${encodeURIComponent(p.PLAYER_NAME)}`}
+                className="text-xs text-zinc-200 hover:text-white hover:underline transition-colors"
+              >
+                {p.PLAYER_NAME}
+              </Link>
+            )}
           </div>
         </td>
         {isDNP ? (
