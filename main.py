@@ -13,6 +13,7 @@ from nba_api.stats.endpoints import TeamInfoCommon
 from nba_api.stats.endpoints import leaguedashplayerstats
 from nba_api.stats.endpoints import ScoreboardV2
 from nba_api.stats.endpoints import boxscoretraditionalv2
+from nba_api.stats.endpoints import commonplayerinfo
 from datetime import datetime, date
 from retrying import retry
 import time
@@ -91,6 +92,96 @@ def get_player(player_id: int):
         print(f"[GET /player/{player_id}] Error: {type(e).__name__}: {str(e)}")
         traceback.print_exc()
         return {"error": str(e)}
+
+@app.get("/player/{player_id}/info")
+def get_player_info(player_id: int):
+    try:
+        row = commonplayerinfo.CommonPlayerInfo(
+            player_id=player_id, timeout=NBA_REQUEST_TIMEOUT
+        ).get_data_frames()[0].iloc[0]
+        return {
+            "team_id":           int(row["TEAM_ID"]) if row["TEAM_ID"] else None,
+            "team_name":         row["TEAM_NAME"],
+            "team_abbreviation": row["TEAM_ABBREVIATION"],
+            "position":          row["POSITION"],
+            "jersey":            row["JERSEY"],
+            "height":            row["HEIGHT"],
+            "weight":            row["WEIGHT"],
+            "roster_status":     row["ROSTERSTATUS"],
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+# Simple TTL cache so the full league dataset isn't re-fetched on every request
+_similarity_cache: dict = {}
+_SIMILARITY_CACHE_TTL = 3600  # 1 hour
+
+SIMILARITY_STATS = ['PTS', 'REB', 'AST', 'STL', 'BLK', 'TOV', 'MIN', 'FG_PCT', 'FG3_PCT', 'FT_PCT']
+
+def _get_league_stats(season: str) -> "pd.DataFrame":
+    import time as _time
+    key = season
+    cached = _similarity_cache.get(key)
+    if cached and (_time.time() - cached['ts'] < _SIMILARITY_CACHE_TTL):
+        return cached['df']
+
+    df = leaguedashplayerstats.LeagueDashPlayerStats(
+        season=season,
+        season_type_all_star='Regular Season',
+        per_mode_detailed='PerGame',
+        timeout=NBA_REQUEST_TIMEOUT,
+    ).get_data_frames()[0]
+
+    # For traded players keep the row with the most GP (their combined/best representation)
+    df = df.sort_values('GP', ascending=False).drop_duplicates('PLAYER_ID').copy()
+    # Drop low-sample players — fewer than 15 GP or under 10 min/game
+    df = df[(df['GP'] >= 15) & (df['MIN'] >= 10)].reset_index(drop=True)
+
+    _similarity_cache[key] = {'df': df, 'ts': _time.time()}
+    return df
+
+@app.get("/player/{player_id}/similar")
+def get_similar_players(player_id: int, season: str = "2024-25"):
+    try:
+        df = _get_league_stats(season)
+
+        if player_id not in df['PLAYER_ID'].values:
+            return {"similar": [], "season": season, "unavailable": True}
+
+        stat_df = df[SIMILARITY_STATS].fillna(df[SIMILARITY_STATS].mean())
+        means = stat_df.mean()
+        stds  = stat_df.std().replace(0, 1)
+        normalized = (stat_df - means) / stds
+
+        target_idx = df[df['PLAYER_ID'] == player_id].index[0]
+        target_vec = normalized.loc[target_idx].values
+
+        diffs     = normalized.values - target_vec
+        distances = np.sqrt((diffs ** 2).sum(axis=1))
+
+        df = df.copy()
+        df['_dist'] = distances
+
+        others   = df[df['PLAYER_ID'] != player_id].sort_values('_dist')
+        max_dist = distances.max() if distances.max() > 0 else 1
+
+        result = []
+        for _, row in others.head(8).iterrows():
+            result.append({
+                'player_id':   int(row['PLAYER_ID']),
+                'player_name': row['PLAYER_NAME'],
+                'team':        row['TEAM_ABBREVIATION'],
+                'similarity':  round((1 - row['_dist'] / max_dist) * 100, 1),
+                'pts':         round(float(row['PTS']), 1),
+                'reb':         round(float(row['REB']), 1),
+                'ast':         round(float(row['AST']), 1),
+            })
+
+        return {"similar": result, "season": season}
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e), "similar": []}
 
 @app.get("/player/{player_id}/recent")
 def get_recent_games(player_id: int):
