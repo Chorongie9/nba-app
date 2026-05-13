@@ -153,7 +153,11 @@ function PlayerDetails() {
 
       {/* Similar Players */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <SimilarPlayers playerId={playerId} />
+        <SimilarPlayers
+          playerId={playerId}
+          regularData={regularData}
+          position={playerInfo?.position || ''}
+        />
       </div>
 
       {/* Recent Games */}

@@ -1,2 +1,28 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+.env.*
+
+# Scratch / temp files
+tempCodeRunnerFile.py
+test.py
+
+# Planning docs
+player_similarity_explained.md
+similarity_improvements.md
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.sw?
+
+# Misc
+package-lock.json

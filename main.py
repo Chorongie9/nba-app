@@ -113,43 +113,101 @@ def get_player_info(player_id: int):
         traceback.print_exc()
         return {"error": str(e)}
 
-# Simple TTL cache so the full league dataset isn't re-fetched on every request
+# Simple TTL cache — each (season, position) combo is cached independently
 _similarity_cache: dict = {}
 _SIMILARITY_CACHE_TTL = 3600  # 1 hour
 
-SIMILARITY_STATS = ['PTS', 'REB', 'AST', 'STL', 'BLK', 'TOV', 'MIN', 'FG_PCT', 'FG3_PCT', 'FT_PCT']
+# Advanced stats used for similarity — describe role, efficiency, and impact
+SIMILARITY_STATS         = ['USG_PCT', 'TS_PCT', 'AST_PCT', 'REB_PCT', 'OFF_RATING', 'DEF_RATING']
+SIMILARITY_STATS_BASIC   = ['PTS', 'REB', 'AST', 'FG_PCT', 'FG3_PCT', 'MIN']
 
-def _get_league_stats(season: str) -> "pd.DataFrame":
-    import time as _time
-    key = season
-    cached = _similarity_cache.get(key)
-    if cached and (_time.time() - cached['ts'] < _SIMILARITY_CACHE_TTL):
+# Maps commonplayerinfo position strings → nba_api position filter codes
+POSITION_MAP = {
+    'Guard':          'G',
+    'Forward':        'F',
+    'Center':         'C',
+    'Guard-Forward':  'G',
+    'Forward-Guard':  'G',
+    'Forward-Center': 'F',
+    'Center-Forward': 'F',
+}
+
+def _get_league_stats(season: str, pos_code: str = '') -> "pd.DataFrame":
+    cache_key = f"{season}_{pos_code or 'all'}"
+    cached = _similarity_cache.get(cache_key)
+    if cached and (time.time() - cached['ts'] < _SIMILARITY_CACHE_TTL):
         return cached['df']
 
-    df = leaguedashplayerstats.LeagueDashPlayerStats(
+    base_kwargs = dict(
         season=season,
         season_type_all_star='Regular Season',
         per_mode_detailed='PerGame',
         timeout=NBA_REQUEST_TIMEOUT,
-    ).get_data_frames()[0]
+    )
+    if pos_code:
+        base_kwargs['player_position_abbreviation_nullable'] = pos_code
 
-    # For traded players keep the row with the most GP (their combined/best representation)
-    df = df.sort_values('GP', ascending=False).drop_duplicates('PLAYER_ID').copy()
-    # Drop low-sample players — fewer than 15 GP or under 10 min/game
+    # The NBA API does not support position filtering on the Advanced measure type —
+    # it returns an empty response. Fetch advanced stats for all players, then let
+    # the inner merge restrict the pool to the position-filtered base rows.
+    def fetch_base():
+        try:
+            return leaguedashplayerstats.LeagueDashPlayerStats(
+                **base_kwargs
+            ).get_data_frames()[0]
+        except Exception:
+            return pd.DataFrame()
+
+    def fetch_advanced():
+        try:
+            return leaguedashplayerstats.LeagueDashPlayerStats(
+                season=season,
+                season_type_all_star='Regular Season',
+                per_mode_detailed='PerGame',
+                measure_type_detailed_defense='Advanced',
+                timeout=NBA_REQUEST_TIMEOUT,
+            ).get_data_frames()[0]
+        except Exception:
+            return pd.DataFrame()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        base_future = executor.submit(fetch_base)
+        adv_future  = executor.submit(fetch_advanced)
+        base_df = base_future.result()
+        adv_df  = adv_future.result()
+
+    if base_df.empty:
+        return pd.DataFrame()
+
+    # For traded players keep the row with the most GP
+    base_df = base_df.sort_values('GP', ascending=False).drop_duplicates('PLAYER_ID').copy()
+
+    if adv_df.empty:
+        df = base_df.copy()
+    else:
+        adv_df = adv_df.sort_values('GP', ascending=False).drop_duplicates('PLAYER_ID').copy()
+        # Inner merge — only players present in position-filtered base_df are kept
+        df = base_df.merge(adv_df[['PLAYER_ID'] + SIMILARITY_STATS], on='PLAYER_ID', how='inner')
+
+    # Drop low-sample players
     df = df[(df['GP'] >= 15) & (df['MIN'] >= 10)].reset_index(drop=True)
 
-    _similarity_cache[key] = {'df': df, 'ts': _time.time()}
+    _similarity_cache[cache_key] = {'df': df, 'ts': time.time()}
     return df
 
 @app.get("/player/{player_id}/similar")
-def get_similar_players(player_id: int, season: str = "2024-25"):
+def get_similar_players(player_id: int, season: str = "2025-26", position: str = ""):
     try:
-        df = _get_league_stats(season)
+        pos_code = POSITION_MAP.get(position, '')
+        df = _get_league_stats(season, pos_code)
 
-        if player_id not in df['PLAYER_ID'].values:
+        if df.empty or player_id not in df['PLAYER_ID'].values:
             return {"similar": [], "season": season, "unavailable": True}
 
-        stat_df = df[SIMILARITY_STATS].fillna(df[SIMILARITY_STATS].mean())
+        has_advanced = all(s in df.columns for s in SIMILARITY_STATS)
+        stats_to_use = SIMILARITY_STATS if has_advanced else SIMILARITY_STATS_BASIC
+
+        stat_df = df[stats_to_use].fillna(df[stats_to_use].mean())
         means = stat_df.mean()
         stds  = stat_df.std().replace(0, 1)
         normalized = (stat_df - means) / stds
@@ -178,7 +236,7 @@ def get_similar_players(player_id: int, season: str = "2024-25"):
                 'ast':         round(float(row['AST']), 1),
             })
 
-        return {"similar": result, "season": season}
+        return {"similar": result, "season": season, "basic_stats": not has_advanced}
     except Exception as e:
         traceback.print_exc()
         return {"error": str(e), "similar": []}
