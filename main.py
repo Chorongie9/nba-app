@@ -241,6 +241,55 @@ def get_similar_players(player_id: int, season: str = "2025-26", position: str =
         traceback.print_exc()
         return {"error": str(e), "similar": []}
 
+@app.get("/compare/{player_id1}/{player_id2}/similarity")
+def compare_similarity(player_id1: int, player_id2: int, season1: str = "2024-25", season2: str = "2024-25"):
+    try:
+        df1 = _get_league_stats(season1)
+        df2 = _get_league_stats(season2) if season2 != season1 else df1
+
+        if df1.empty or df2.empty:
+            return {"similarity": None, "unavailable": True}
+        if player_id1 not in df1['PLAYER_ID'].values or player_id2 not in df2['PLAYER_ID'].values:
+            return {"similarity": None, "unavailable": True}
+
+        has_adv1 = all(s in df1.columns for s in SIMILARITY_STATS)
+        has_adv2 = all(s in df2.columns for s in SIMILARITY_STATS)
+        stats_to_use = SIMILARITY_STATS if (has_adv1 and has_adv2) else SIMILARITY_STATS_BASIC
+
+        combined = pd.concat([df1[stats_to_use], df2[stats_to_use]], ignore_index=True)
+        combined = combined.fillna(combined.mean())
+        means = combined.mean()
+        stds = combined.std().replace(0, 1)
+
+        row1 = df1[df1['PLAYER_ID'] == player_id1].iloc[0][stats_to_use].fillna(means)
+        row2 = df2[df2['PLAYER_ID'] == player_id2].iloc[0][stats_to_use].fillna(means)
+
+        vec1 = ((row1 - means) / stds).values.astype(float)
+        vec2 = ((row2 - means) / stds).values.astype(float)
+
+        distance = float(np.sqrt(((vec1 - vec2) ** 2).sum()))
+        # Normalize against the combined pool's max pairwise distance for a meaningful percentage
+        all_normalized = ((combined - means) / stds).values
+        pairwise_max = 0.0
+        sample = all_normalized[::max(1, len(all_normalized) // 200)]
+        for row in sample:
+            dists = np.sqrt(((all_normalized - row) ** 2).sum(axis=1))
+            pairwise_max = max(pairwise_max, dists.max())
+        pairwise_max = pairwise_max or 1
+
+        similarity = round((1 - distance / pairwise_max) * 100, 1)
+        similarity = max(0.0, similarity)
+
+        return {
+            "similarity": similarity,
+            "season1": season1,
+            "season2": season2,
+            "basic_stats": stats_to_use is SIMILARITY_STATS_BASIC,
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e), "similarity": None}
+
 @app.get("/player/{player_id}/recent")
 def get_recent_games(player_id: int):
     try:

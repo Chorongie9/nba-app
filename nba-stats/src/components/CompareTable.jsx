@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import PlayerStats from './PlayerStats';
 import { Link } from 'react-router-dom';
 import CareerAverages from './CareerAverages';
@@ -34,6 +34,23 @@ const computeCareer = (data) => {
   };
 };
 
+const computeSeason = (data, seasonId) => {
+  if (!data?.length || !seasonId) return null;
+  const row = data.find(r => r.SEASON_ID === seasonId);
+  if (!row) return null;
+  const g = row.GP || 1;
+  return {
+    GP:    row.GP || 0,
+    PPG:   (row.PTS || 0) / g,
+    RPG:   (row.REB || 0) / g,
+    APG:   (row.AST || 0) / g,
+    SPG:   (row.STL || 0) / g,
+    BPG:   (row.BLK || 0) / g,
+    "FG%": row.FGA ? (row.FGM / row.FGA) * 100 : 0,
+    "FT%": row.FTA ? (row.FTM / row.FTA) * 100 : 0,
+  };
+};
+
 const SCOREBOARD_STATS = [
   { key: "GP",   label: "GP",   fmt: v => Math.round(v) },
   { key: "PPG",  label: "PPG",  fmt: v => v.toFixed(1) },
@@ -63,14 +80,70 @@ const Toggle = ({ showPlayoffs, setShowPlayoffs }) => (
   </div>
 );
 
+const SeasonSelect = ({ seasons, value, onChange }) => (
+  <select
+    value={value}
+    onChange={e => onChange(e.target.value)}
+    className="bg-zinc-800 border border-zinc-700 text-zinc-400 text-[10px] uppercase tracking-widest rounded px-2 py-1 focus:outline-none focus:border-zinc-500 cursor-pointer"
+  >
+    {seasons.map(s => <option key={s} value={s}>{s}</option>)}
+  </select>
+);
+
 const Scoreboard = ({ player1Regular, player1Playoffs, player2Regular, player2Playoffs, firstPlayerName, secondPlayerName, player1Id, player2Id }) => {
   const [showPlayoffs, setShowPlayoffs] = useState(false);
   const hasPlayoffs = player1Playoffs?.length > 0 && player2Playoffs?.length > 0;
-  const s1 = computeCareer(showPlayoffs ? player1Playoffs : player1Regular);
-  const s2 = computeCareer(showPlayoffs ? player2Playoffs : player2Regular);
+
+  const p1Seasons = useMemo(() => {
+    const data = player1Regular || [];
+    const seen = new Set();
+    return [...data].reverse().map(r => r.SEASON_ID).filter(s => s && !seen.has(s) && seen.add(s));
+  }, [player1Regular]);
+
+  const p2Seasons = useMemo(() => {
+    const data = player2Regular || [];
+    const seen = new Set();
+    return [...data].reverse().map(r => r.SEASON_ID).filter(s => s && !seen.has(s) && seen.add(s));
+  }, [player2Regular]);
+
+  const [season1, setSeason1] = useState(p1Seasons[0] || '');
+  const [season2, setSeason2] = useState(p2Seasons[0] || '');
+
+  const p1Data = showPlayoffs ? player1Playoffs : player1Regular;
+  const p2Data = showPlayoffs ? player2Playoffs : player2Regular;
+  const s1 = computeSeason(p1Data, season1);
+  const s2 = computeSeason(p2Data, season2);
+
+  const [similarity, setSimilarity] = useState(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [basicStats, setBasicStats] = useState(false);
+
+  useEffect(() => { if (p1Seasons[0]) setSeason1(p1Seasons[0]); }, [p1Seasons]);
+  useEffect(() => { if (p2Seasons[0]) setSeason2(p2Seasons[0]); }, [p2Seasons]);
+
+  useEffect(() => {
+    if (!player1Id || !player2Id || !season1 || !season2) return;
+    setSimilarity(null);
+    setSimLoading(true);
+    const controller = new AbortController();
+    const params = new URLSearchParams({ season1, season2 });
+    fetch(`http://localhost:8000/compare/${player1Id}/${player2Id}/similarity?${params}`, { signal: controller.signal })
+      .then(r => r.json())
+      .then(d => { setSimilarity(d.similarity); setBasicStats(!!d.basic_stats); })
+      .catch(() => setSimilarity(null))
+      .finally(() => setSimLoading(false));
+    return () => controller.abort();
+  }, [player1Id, player2Id, season1, season2]);
+
+  const needsSecondPlayer = !player2Regular?.length;
+  if (needsSecondPlayer) return (
+    <p className="text-center text-zinc-600 py-12 text-sm">Select a second player to see the scoreboard.</p>
+  );
 
   if (!s1 || !s2) return (
-    <p className="text-center text-zinc-600 py-12 text-sm">Select a second player to see the scoreboard.</p>
+    <p className="text-center text-zinc-600 py-12 text-sm">
+      {showPlayoffs ? 'No playoff data for the selected season(s).' : 'No data for the selected season(s).'}
+    </p>
   );
 
   return (
@@ -95,10 +168,30 @@ const Scoreboard = ({ player1Regular, player1Playoffs, player2Regular, player2Pl
           >
             {firstPlayerName}
           </Link>
+          {p1Seasons.length > 1 && (
+            <SeasonSelect seasons={p1Seasons} value={season1} onChange={setSeason1} />
+          )}
         </div>
-        <p className="text-center text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-semibold">
-          Career Averages
-        </p>
+        <div className="flex flex-col items-center gap-1">
+          {simLoading && (
+            <span className="text-zinc-600 text-xs animate-pulse">Calculating…</span>
+          )}
+          {!simLoading && similarity != null && (
+            <>
+              <span className="font-display font-extrabold text-3xl text-amber-400">{similarity}%</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-semibold">Similarity</span>
+              {basicStats && (
+                <span className="text-[9px] text-zinc-700 tracking-wider">Per-game stats</span>
+              )}
+            </>
+          )}
+          {!simLoading && similarity == null && season1 && season2 && (
+            <span className="text-zinc-700 text-[10px] uppercase tracking-wider">Unavailable</span>
+          )}
+          <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-semibold mt-1">
+            Season Averages
+          </p>
+        </div>
         <div className="flex flex-col items-center gap-3">
           <img
             src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${player2Id}.png`}
@@ -112,6 +205,9 @@ const Scoreboard = ({ player1Regular, player1Playoffs, player2Regular, player2Pl
           >
             {secondPlayerName}
           </Link>
+          {p2Seasons.length > 1 && (
+            <SeasonSelect seasons={p2Seasons} value={season2} onChange={setSeason2} />
+          )}
         </div>
       </div>
 
