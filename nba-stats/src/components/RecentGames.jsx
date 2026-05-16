@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 const RecentGames = ({ playerId }) => {
   const [recentGames, setRecentGames] = useState([]);
@@ -39,23 +40,28 @@ const RecentGames = ({ playerId }) => {
       {header}
       <div className="divide-y divide-zinc-800/50">
         {recentGames.map((game, i) => (
-          <div key={game.GAME_ID ?? i} className="flex items-center justify-between py-3.5">
-            <div className="flex items-center gap-3">
+          <Link
+            key={game.GAME_ID ?? i}
+            to={game.GAME_ID ? `/games/${game.GAME_ID}` : '#'}
+            className="flex items-center justify-between py-3.5 hover:bg-zinc-800/30 -mx-3 px-3 rounded-lg transition-colors group"
+          >
+            <div className="flex items-center gap-3 min-w-[120px]">
               <span className="text-sm font-medium text-zinc-200">{game.MATCHUP}</span>
               {game.GAME_TYPE === 'Playoffs' && (
                 <span className="text-[10px] bg-amber-400/15 text-amber-400 px-1.5 py-0.5 rounded font-semibold tracking-wide">PO</span>
               )}
             </div>
             <span className="text-xs text-zinc-600 tabular-nums">{game.GAME_DATE}</span>
-            <div className="flex gap-5">
+            <div className="flex items-center gap-5">
               {[{ v: game.PTS, l: "pts" }, { v: game.REB, l: "reb" }, { v: game.AST, l: "ast" }].map(({ v, l }) => (
                 <span key={l} className="flex items-baseline gap-1">
                   <span className="font-display font-bold text-xl text-zinc-100 leading-none">{v}</span>
                   <span className="text-[10px] uppercase tracking-wide text-zinc-600">{l}</span>
                 </span>
               ))}
+              <span className="text-zinc-700 group-hover:text-zinc-400 transition-colors text-sm">›</span>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
     </div>

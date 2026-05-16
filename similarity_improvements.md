@@ -34,6 +34,7 @@ For example:
 - A high-usage ball-handler and a catch-and-shoot role player might both average
   15/4/3 but have nothing in common stylistically.
 
+
 Counting stats are also redundant in certain ways. MIN, PTS, and FGA are all
 measuring roughly the same thing — "how much does this player play". Including
 all three inflates the weight of usage in the comparison.

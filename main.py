@@ -330,6 +330,8 @@ def get_recent_games(player_id: int):
         combined['_sort_date'] = pd.to_datetime(combined['GAME_DATE'], format='%b %d, %Y', errors='coerce')
         combined = combined.sort_values('_sort_date', ascending=False).drop(columns=['_sort_date']).head(5)
 
+        if 'Game_ID' in combined.columns:
+            combined = combined.rename(columns={'Game_ID': 'GAME_ID'})
         combined = combined.replace([np.nan, np.inf, -np.inf], None).astype(object)
         return combined.to_dict(orient="records")
 
