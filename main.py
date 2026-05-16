@@ -505,7 +505,11 @@ def get_team_profile(abbr: str):
         )
         df = standings.get_data_frames()[0]
 
-        team_name = team["full_name"]
+        conference_rank = None
+        if not df.empty:
+            standings_row = df[df["TeamID"] == team_id]
+            if not standings_row.empty:
+                conference_rank = int(standings_row.iloc[0]["PlayoffRank"])
         # TeamInfoCommon expects 'season_nullable' (not 'season')
         try:
             team_info = TeamInfoCommon(
@@ -575,17 +579,21 @@ def get_team_profile(abbr: str):
         season_stats_df = season_stats_df.replace([np.nan, np.inf, -np.inf], None).astype(object)
         season_stats = season_stats_df.to_dict(orient="records")
 
-        playerseasonstats = leaguedashplayerstats.LeagueDashPlayerStats(
-            season=season,
-            team_id_nullable=team_id,
-            season_type_all_star="Regular Season",
-            per_mode_detailed="PerGame",
-            timeout=NBA_REQUEST_TIMEOUT,
-        )
-        player_stats_df = playerseasonstats.get_data_frames()[0]
-        player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
-        player_stats_df = player_stats_df.astype(object)
-        player_stats = player_stats_df.to_dict(orient="records")
+        try:
+            playerseasonstats = leaguedashplayerstats.LeagueDashPlayerStats(
+                season=season,
+                team_id_nullable=team_id,
+                season_type_all_star="Regular Season",
+                per_mode_detailed="PerGame",
+                timeout=NBA_REQUEST_TIMEOUT,
+            )
+            player_stats_df = playerseasonstats.get_data_frames()[0]
+            player_stats_df = player_stats_df.replace([np.nan, np.inf, -np.inf], None)
+            player_stats_df = player_stats_df.astype(object)
+            player_stats = player_stats_df.to_dict(orient="records")
+        except Exception as ps_err:
+            print(f"Error fetching player stats for {abbr}: {ps_err}")
+            player_stats = []
 
         return {
             "team_info": team,
@@ -596,7 +604,8 @@ def get_team_profile(abbr: str):
             "wins": team.get("wins"),
             "losses": team.get("losses"),
             "division": division,
-            "conference": conference
+            "conference": conference,
+            "placing": conference_rank,
         }
 
     except Exception as e:
@@ -869,6 +878,68 @@ def get_team_season(abbr: str, season: str):
             else f"Internal server error: {str(e)}"
         )
         raise HTTPException(status_code=status, detail=detail)
+
+
+_schedule_cache = {}
+
+@app.get("/teams/{abbr}/{season}/schedule")
+def get_team_schedule(abbr: str, season: str):
+    cache_key = (abbr.upper(), season)
+    now = time.time()
+    if cache_key in _schedule_cache:
+        expires_at, cached = _schedule_cache[cache_key]
+        if now < expires_at:
+            return cached
+        del _schedule_cache[cache_key]
+
+    try:
+        abbr = abbr.strip().upper()
+        all_teams = teams.get_teams()
+        team = next((t for t in all_teams if t["abbreviation"] == abbr), None)
+        if not team:
+            raise HTTPException(status_code=404, detail=f"Team {abbr} not found")
+
+        team_id = team["id"]
+        abbr_to_id = {t["abbreviation"]: t["id"] for t in all_teams}
+
+        log = teamgamelog.TeamGameLog(team_id=team_id, season=season, timeout=NBA_REQUEST_TIMEOUT)
+        games_df = log.get_data_frames()[0]
+        if games_df.empty:
+            return []
+
+        games_df = games_df.replace([np.nan, np.inf, -np.inf], None)
+
+        result = []
+        for _, row in games_df.iterrows():
+            matchup = str(row.get("MATCHUP") or "")
+            is_home = "vs." in matchup
+            sep = " vs. " if is_home else " @ "
+            parts = matchup.split(sep, 1)
+            opp_abbr = parts[1].strip() if len(parts) == 2 else None
+            opp_id = abbr_to_id.get(opp_abbr) if opp_abbr else None
+            game_id = str(row.get("Game_ID") or row.get("GAME_ID") or "")
+            result.append({
+                "GAME_ID": game_id,
+                "GAME_DATE": str(row.get("GAME_DATE") or ""),
+                "MATCHUP": matchup,
+                "WL": str(row.get("WL") or ""),
+                "PTS": row.get("PTS"),
+                "W": row.get("W"),
+                "L": row.get("L"),
+                "IS_HOME": is_home,
+                "OPP_ABBR": opp_abbr,
+                "OPP_ID": opp_id,
+            })
+
+        ttl = _team_season_cache_ttl_sec(season)
+        _schedule_cache[cache_key] = (now + ttl, result)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_team_schedule: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 _game_cache = {}

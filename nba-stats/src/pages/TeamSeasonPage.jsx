@@ -41,10 +41,17 @@ const TeamSeasonPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const [schedule, setSchedule] = useState(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleError, setScheduleError] = useState(null);
+  const [showSchedule, setShowSchedule] = useState(false);
+
   useEffect(() => {
     if (!abbr || !season) return;
     setLoading(true);
     setError(null);
+    setShowSchedule(false);
+    setSchedule(null);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
     fetch(`http://localhost:8000/teams/${abbr}/${season}`, { signal: controller.signal })
@@ -53,6 +60,16 @@ const TeamSeasonPage = () => {
       .catch(err => { setError(err.name === 'AbortError' ? 'Request timed out' : err.message); setLoading(false); })
       .finally(() => clearTimeout(timeout));
   }, [abbr, season]);
+
+  const loadSchedule = () => {
+    if (schedule) { setShowSchedule(true); return; }
+    setScheduleLoading(true);
+    setScheduleError(null);
+    fetch(`http://localhost:8000/teams/${abbr}/${season}/schedule`)
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { setSchedule(data); setShowSchedule(true); setScheduleLoading(false); })
+      .catch(err => { setScheduleError(err.message); setScheduleLoading(false); });
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -168,56 +185,130 @@ const TeamSeasonPage = () => {
         )}
       </div>
 
-      {/* Recent Games */}
+      {/* Games section */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-5">Recent Games</h2>
-        {recentGames.length > 0 ? (
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">
+            {showSchedule ? `${season} Schedule` : 'Recent Games'}
+          </h2>
+          {showSchedule && (
+            <button
+              onClick={() => setShowSchedule(false)}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors uppercase tracking-widest"
+            >
+              ← Recent Only
+            </button>
+          )}
+        </div>
+
+        {!showSchedule && (
+          <>
+            {recentGames.length > 0 ? (
+              <div className="divide-y divide-zinc-800/50">
+                {recentGames.map((game, i) => {
+                  const isWin = game.WL === 'W';
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => game.GAME_ID && navigate(`/games/${game.GAME_ID}`)}
+                      className={`flex items-center justify-between py-3.5 pl-4 border-l-2 ${isWin ? 'border-emerald-500' : 'border-rose-500'} ${game.GAME_ID ? 'cursor-pointer hover:bg-zinc-800/30 transition-colors' : ''}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <span className={`text-xs font-bold w-4 shrink-0 ${isWin ? 'text-emerald-500' : 'text-rose-500'}`}>{game.WL}</span>
+                        <div className="flex items-center gap-2">
+                          <img src={getTeamLogo(teamId)} alt={teamAbbr} className="w-6 h-6 object-contain" onError={e => { e.target.style.display = 'none'; }} />
+                          <span className="font-display font-bold text-xl text-zinc-100 leading-none">{game.PTS}</span>
+                          <span className="text-zinc-700 text-sm">–</span>
+                          <span className="font-display font-bold text-xl text-zinc-100 leading-none">{game.OPP_PTS}</span>
+                          {game.OPP_ID && (
+                            <img src={getTeamLogo(game.OPP_ID)} alt={game.OPP_ABBR} className="w-6 h-6 object-contain" onError={e => { e.target.style.display = 'none'; }} />
+                          )}
+                        </div>
+                        {game.OPP_ABBR && (
+                          <Link
+                            to={`/teams/${game.OPP_ABBR}/${season}`}
+                            onClick={e => e.stopPropagation()}
+                            className="text-xs text-zinc-500 hover:text-amber-400 transition-colors font-medium"
+                          >
+                            {game.OPP_ABBR}
+                          </Link>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 pr-4">
+                        <span className="text-xs text-zinc-600 tabular-nums">{game.GAME_DATE}</span>
+                        {game.GAME_ID && <span className="text-[10px] text-zinc-700 uppercase tracking-wider">Box Score →</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-zinc-600 text-sm">No recent games found</p>
+            )}
+
+            <div className="mt-4 pt-4 border-t border-zinc-800/50 flex justify-center">
+              <button
+                onClick={loadSchedule}
+                disabled={scheduleLoading}
+                className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors uppercase tracking-widest px-4 py-2 border border-zinc-800 hover:border-zinc-600 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {scheduleLoading ? 'Loading…' : 'View All Games'}
+              </button>
+              {scheduleError && <p className="text-rose-500/70 text-xs ml-4 self-center">{scheduleError}</p>}
+            </div>
+          </>
+        )}
+
+        {showSchedule && schedule && (
           <div className="divide-y divide-zinc-800/50">
-            {recentGames.map((game, i) => {
+            {schedule.map((game, i) => {
               const isWin = game.WL === 'W';
               return (
                 <div
                   key={i}
                   onClick={() => game.GAME_ID && navigate(`/games/${game.GAME_ID}`)}
-                  className={`flex items-center justify-between py-3.5 pl-4 border-l-2 ${isWin ? 'border-emerald-500' : 'border-rose-500'} ${game.GAME_ID ? 'cursor-pointer hover:bg-zinc-800/30 transition-colors' : ''}`}
+                  className={`flex items-center justify-between py-3 pl-3 border-l-2 ${isWin ? 'border-emerald-500' : 'border-rose-400/70'} ${game.GAME_ID ? 'cursor-pointer hover:bg-zinc-800/30 transition-colors' : ''} group`}
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
                     <span className={`text-xs font-bold w-4 shrink-0 ${isWin ? 'text-emerald-500' : 'text-rose-500'}`}>{game.WL}</span>
-                    <div className="flex items-center gap-2">
-                      <img src={getTeamLogo(teamId)} alt={teamAbbr} className="w-6 h-6 object-contain" onError={e => { e.target.style.display = 'none'; }} />
-                      <span className="font-display font-bold text-xl text-zinc-100 leading-none">{game.PTS}</span>
-                      <span className="text-zinc-700 text-sm">–</span>
-                      <span className="font-display font-bold text-xl text-zinc-100 leading-none">{game.OPP_PTS}</span>
+                    <span className="text-[10px] text-zinc-600 tabular-nums w-24 shrink-0">{game.GAME_DATE}</span>
+                    <span className="text-[10px] text-zinc-700 uppercase shrink-0">{game.IS_HOME ? 'vs' : '@'}</span>
+                    <div className="flex items-center gap-1.5">
                       {game.OPP_ID && (
-                        <img src={getTeamLogo(game.OPP_ID)} alt={game.OPP_ABBR} className="w-6 h-6 object-contain" onError={e => { e.target.style.display = 'none'; }} />
+                        <img src={getTeamLogo(game.OPP_ID)} alt={game.OPP_ABBR} className="w-5 h-5 object-contain" onError={e => { e.target.style.display = 'none'; }} />
+                      )}
+                      {game.OPP_ABBR && (
+                        <Link
+                          to={`/teams/${game.OPP_ABBR}/${season}`}
+                          onClick={e => e.stopPropagation()}
+                          className="text-xs text-zinc-400 hover:text-amber-400 transition-colors font-medium"
+                        >
+                          {game.OPP_ABBR}
+                        </Link>
                       )}
                     </div>
-                    {game.OPP_ABBR && (
-                      <Link
-                        to={`/teams/${game.OPP_ABBR}/${season}`}
-                        onClick={e => e.stopPropagation()}
-                        className="text-xs text-zinc-500 hover:text-amber-400 transition-colors font-medium"
-                      >
-                        {game.OPP_ABBR}
-                      </Link>
-                    )}
                   </div>
-                  <div className="flex items-center gap-3 pr-4">
-                    <span className="text-xs text-zinc-600 tabular-nums">{game.GAME_DATE}</span>
-                    {game.GAME_ID && <span className="text-[10px] text-zinc-700 uppercase tracking-wider">Box Score →</span>}
+                  <div className="flex items-center gap-4 pr-3">
+                    <span className="font-display font-bold text-lg text-zinc-100 leading-none tabular-nums">
+                      {game.PTS ?? '—'}
+                    </span>
+                    {(game.W != null && game.L != null) && (
+                      <span className="text-[10px] text-zinc-600 tabular-nums w-12 text-right">{game.W}–{game.L}</span>
+                    )}
+                    {game.GAME_ID && (
+                      <span className="text-zinc-700 group-hover:text-zinc-400 transition-colors text-sm">›</span>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
-        ) : (
-          <p className="text-zinc-600 text-sm">No recent games found</p>
         )}
       </div>
 
       {/* Roster */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <PlayerStatsTable abbr={abbr} season={season} />
+        <PlayerStatsTable abbr={abbr} season={season} playerStats={teamData.player_stats} />
       </div>
     </div>
   );

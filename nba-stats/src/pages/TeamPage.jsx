@@ -11,6 +11,13 @@ const getTeamLogo = (identifier) => {
   return `https://i.cdn.turner.com/nba/nba/.element/img/4.0/global/logos/512x512/bg.white/${identifier}_logo.svg`;
 };
 
+const ordinal = (n) => {
+  if (!n) return null;
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
 const TeamPage = () => {
   const { abbr } = useParams();
   const season = "2025-26";
@@ -79,6 +86,12 @@ const TeamPage = () => {
               <span>{team.division} Division</span>
               <span>·</span>
               <span>{season}</span>
+              {teamData.placing && (
+                <>
+                  <span>·</span>
+                  <span>{ordinal(teamData.placing)} in conference</span>
+                </>
+              )}
             </div>
           </div>
           {(teamData.wins != null && teamData.losses != null) && (
@@ -94,9 +107,9 @@ const TeamPage = () => {
         {seasonStats && (
           <div className="grid grid-cols-4 divide-x divide-zinc-800 text-center mt-8 pt-8 border-t border-zinc-800">
             {[
-              { label: "PPG", value: seasonStats.PTS?.toFixed(1) },
-              { label: "RPG", value: seasonStats.REB?.toFixed(1) },
-              { label: "APG", value: seasonStats.AST?.toFixed(1) },
+              { label: "PPG", value: (seasonStats.PTS/82)?.toFixed(1) },
+              { label: "RPG", value: (seasonStats.REB/82)?.toFixed(1) },
+              { label: "APG", value: (seasonStats.AST/82)?.toFixed(1) },
               { label: "FG%", value: seasonStats.FG_PCT ? (seasonStats.FG_PCT * 100).toFixed(1) + "%" : "—" },
             ].map(({ label, value }) => (
               <div key={label} className="px-4">
@@ -110,13 +123,25 @@ const TeamPage = () => {
 
       {/* Recent Games */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-5">Recent Games</h2>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Recent Games</h2>
+          <Link
+            to={`/teams/${abbr}/${season}`}
+            className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors uppercase tracking-widest"
+          >
+            Season Page →
+          </Link>
+        </div>
         {recentGames.length > 0 ? (
           <div className="divide-y divide-zinc-800/50">
             {recentGames.map((game, i) => {
               const isWin = game.WL === 'W';
               return (
-                <div key={i} className={`flex items-center justify-between py-3.5 pl-4 border-l-2 ${isWin ? 'border-emerald-500' : 'border-rose-500'}`}>
+                <div
+                  key={i}
+                  onClick={() => game.GAME_ID && navigate(`/games/${game.GAME_ID}`)}
+                  className={`flex items-center justify-between py-3.5 pl-4 border-l-2 ${isWin ? 'border-emerald-500' : 'border-rose-500'} ${game.GAME_ID ? 'cursor-pointer hover:bg-zinc-800/30 transition-colors' : ''}`}
+                >
                   <div className="flex items-center gap-4">
                     <span className={`text-xs font-bold w-4 shrink-0 ${isWin ? 'text-emerald-500' : 'text-rose-500'}`}>{game.WL}</span>
                     <div className="flex items-center gap-2">
@@ -131,13 +156,17 @@ const TeamPage = () => {
                     {game.OPP_ABBR && (
                       <Link
                         to={`/teams/${game.OPP_ABBR}/${season}`}
+                        onClick={e => e.stopPropagation()}
                         className="text-xs text-zinc-500 hover:text-amber-400 transition-colors font-medium"
                       >
                         {game.OPP_ABBR}
                       </Link>
                     )}
                   </div>
-                  <span className="text-xs text-zinc-600 tabular-nums">{game.GAME_DATE}</span>
+                  <div className="flex items-center gap-3 pr-4">
+                    <span className="text-xs text-zinc-600 tabular-nums">{game.GAME_DATE}</span>
+                    {game.GAME_ID && <span className="text-[10px] text-zinc-700 uppercase tracking-wider">Box Score →</span>}
+                  </div>
                 </div>
               );
             })}
@@ -149,7 +178,7 @@ const TeamPage = () => {
 
       {/* Roster */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <PlayerStatsTable abbr={abbr} season={season} />
+        <PlayerStatsTable abbr={abbr} season={season} playerStats={teamData.player_stats} />
       </div>
     </div>
   );

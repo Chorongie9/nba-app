@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
-const PlayerStatsTable = ({ abbr, season }) => {
-  const [teamData, setTeamData] = useState(null);
-  const [loading, setLoading] = useState(true);
+const PlayerStatsTable = ({ abbr, season, playerStats: externalStats }) => {
+  const [fetchedStats, setFetchedStats] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'PTS', direction: 'desc' });
 
   useEffect(() => {
+    if (externalStats !== undefined) return;
     if (!abbr || !season) return;
     setLoading(true);
     setError(null);
@@ -15,10 +16,10 @@ const PlayerStatsTable = ({ abbr, season }) => {
     const timeout = setTimeout(() => controller.abort(), 60000);
     fetch(`http://localhost:8000/teams/${abbr}/${season}`, { signal: controller.signal })
       .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-      .then(data => setTeamData(data))
+      .then(data => setFetchedStats(data.player_stats || []))
       .catch(err => setError(err.name === 'AbortError' ? 'Request timed out' : err.message))
       .finally(() => { setLoading(false); clearTimeout(timeout); });
-  }, [abbr, season]);
+  }, [abbr, season, externalStats]);
 
   const handleSort = (col) => {
     setSortConfig(prev => ({
@@ -27,7 +28,8 @@ const PlayerStatsTable = ({ abbr, season }) => {
     }));
   };
 
-  const sortedPlayers = (teamData?.player_stats || []).slice().sort((a, b) => {
+  const players = externalStats ?? fetchedStats ?? [];
+  const sortedPlayers = players.slice().sort((a, b) => {
     const valA = isNaN(a[sortConfig.key]) ? String(a[sortConfig.key]).toLowerCase() : Number(a[sortConfig.key]);
     const valB = isNaN(b[sortConfig.key]) ? String(b[sortConfig.key]).toLowerCase() : Number(b[sortConfig.key]);
     if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
